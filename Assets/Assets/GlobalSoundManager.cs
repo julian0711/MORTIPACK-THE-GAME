@@ -46,7 +46,7 @@ public class GlobalSoundManager : MonoBehaviour
                 seSource = gameObject.AddComponent<AudioSource>();
                 seSource.loop = false;
                 seSource.playOnAwake = false;
-                seSource.volume = 0.5f; // Lowered default SE volume
+                seSource.volume = 0.3f; // Lowered default SE volume to 0.3
             }
         }
         else
