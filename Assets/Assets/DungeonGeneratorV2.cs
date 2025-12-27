@@ -1,0 +1,913 @@
+using UnityEngine;
+using System.Collections.Generic;
+
+public class DungeonGeneratorV2 : MonoBehaviour
+{
+    [Header("ダンジョン設定 (Grid & Size)")]
+    [SerializeField] private int gridWidth = 25;
+    [SerializeField] private int gridHeight = 25;
+    [SerializeField] private int minRooms = 5;
+    [SerializeField] private int maxRooms = 10;
+    [SerializeField] private int minRoomSize = 4;
+    [SerializeField] private int maxRoomSize = 6;
+    [SerializeField] private float tileSize = 1f;
+    
+    [Header("プレハブ設定 (Map Objects)")]
+    [SerializeField] private GameObject floorPrefab;
+    [SerializeField] private GameObject wallPrefab;
+    [SerializeField] private GameObject doorPrefab1;
+    [SerializeField] private GameObject doorPrefab2;
+
+    [Header("装飾・生成率 (Decorations)")]
+    [SerializeField] private GameObject bloodPrefab;
+    [SerializeField] private float bloodSpawnChance = 0.05f;
+    [SerializeField] private float shopDoorChance = 0.5f;
+    
+    [Header("エネミー設定 (Enemies)")]
+    [SerializeField] private GameObject enemyPrefab;
+    [SerializeField] private int minEnemies = 2;
+    [SerializeField] private int maxEnemies = 5;
+    
+    [Header("棚・アイテム設定 (Shelves)")]
+    [SerializeField] private GameObject shelfPrefab;
+    [SerializeField] private int minShelvesPerRoom = 0;
+    [SerializeField] private int maxShelvesPerRoom = 7;
+    [SerializeField] private Sprite shelfSearchedSprite;
+
+    [Header("参照 (References)")]
+    [SerializeField] private TurnManager turnManager;
+    [SerializeField] private GameObject playerObject;
+    public ItemDatabase itemManager; // Assign in Inspector or Find
+    
+    [Header("アニメーション・スプライト (Visuals)")]
+    [SerializeField] private Sprite playerIdleSprite2;
+    [SerializeField] private Sprite enemyIdleSprite2;
+    [SerializeField] private Sprite enemyDanceSprite; // For Radio Stun Effect
+
+    public Vector3 GetRandomWalkablePosition()
+    {
+        if (rooms == null || rooms.Count == 0) return Vector3.zero;
+
+        // Try to find a valid spot
+        for (int i = 0; i < 20; i++)
+        {
+            Room randomRoom = rooms[Random.Range(0, rooms.Count)];
+            int x = Random.Range(randomRoom.x + 1, randomRoom.x + randomRoom.width - 1);
+            int y = Random.Range(randomRoom.y + 1, randomRoom.y + randomRoom.height - 1);
+
+            if (IsTileWalkable(x, y))
+            {
+                return new Vector3(x * tileSize, y * tileSize, -1f); // Player Z is -1
+            }
+        }
+        
+        // Fallback to start room center if random fails
+        Vector2Int center = rooms[0].Center();
+        return new Vector3(center.x * tileSize, center.y * tileSize, -1f);
+    }
+    
+
+    
+    private int[,] grid;
+    private List<Room> rooms = new List<Room>();
+    
+    private class Room
+    {
+        public int x, y, width, height;
+        public Room(int x, int y, int width, int height)
+        {
+            this.x = x;
+            this.y = y;
+            this.width = width;
+            this.height = height;
+        }
+        
+        public Vector2Int Center()
+        {
+            return new Vector2Int(x + width / 2, y + height / 2);
+        }
+    }
+    
+    private void Start()
+    {
+        GenerateDungeon();
+        
+        TurnManager tm = FindObjectOfType<TurnManager>();
+        if (tm != null)
+        {
+            tm.OnTurnCompleted += OnTurnCompleted;
+        }
+    }
+    
+    private int radarTurnsRemaining = 0;
+
+    private void OnTurnCompleted()
+    {
+        if (radarTurnsRemaining > 0)
+        {
+            radarTurnsRemaining--;
+            if (radarTurnsRemaining <= 0)
+            {
+                ResetEnemiesUnderFog();
+                if (GameUIManager.Instance != null)
+                {
+                    GameUIManager.Instance.ShowMessage("探知機の効果が切れた。");
+                }
+            }
+        }
+    }
+    
+    [Header("Fog Settings")]
+    [SerializeField] private bool useFogOfWar = true;
+    private GameObject[,] fogGrid;
+
+    private void GenerateDungeon()
+    {
+        grid = new int[gridWidth, gridHeight];
+        rooms.Clear();
+        
+        // グリッド初期化
+        for (int x = 0; x < gridWidth; x++)
+        {
+            for (int y = 0; y < gridHeight; y++)
+            {
+                grid[x, y] = 1; // 1 = 壁
+            }
+        }
+        
+        // 部屋生成
+        int targetRooms = Random.Range(minRooms, maxRooms + 1);
+        int attempts = 0;
+        int maxAttempts = 100; // 無限ループ防止
+
+        while (rooms.Count < targetRooms && attempts < maxAttempts)
+        {
+            attempts++;
+            
+            int roomWidth = Random.Range(minRoomSize, maxRoomSize + 1);
+            int roomHeight = Random.Range(minRoomSize, maxRoomSize + 1);
+            int roomX = Random.Range(1, gridWidth - roomWidth - 1);
+            int roomY = Random.Range(1, gridHeight - roomHeight - 1);
+            
+            Room newRoom = new Room(roomX, roomY, roomWidth, roomHeight);
+            
+            bool overlaps = false;
+            foreach (Room other in rooms)
+            {
+                if (RoomsOverlap(newRoom, other))
+                {
+                    overlaps = true;
+                    break;
+                }
+            }
+            
+            if (!overlaps)
+            {
+                CreateRoom(newRoom);
+                
+                if (rooms.Count > 0)
+                {
+                    ConnectRooms(rooms[rooms.Count - 1], newRoom);
+                }
+                
+                rooms.Add(newRoom);
+            }
+        }
+        
+        // 安全策: 試行回数を超えても部屋が1つしかない場合、強制的に終了しないようにログを出すなど（通常発生しにくい）
+        if (rooms.Count < 2)
+        {
+            Debug.LogWarning($"[DungeonGeneratorV2] Failed to generate multiple rooms after {maxAttempts} attempts. Rooms: {rooms.Count}");
+        }
+        
+        // 部屋の数がある程度あれば、ランダムに追加の通路を作ってループさせる
+        if (rooms.Count > 3)
+        {
+            // 全部屋数の約30%〜50%程度の追加パスを試みる
+            int extraPaths = Random.Range(rooms.Count / 3, rooms.Count / 2 + 1);
+            
+            for (int i = 0; i < extraPaths; i++)
+            {
+                Room roomA = rooms[Random.Range(0, rooms.Count)];
+                Room roomB = rooms[Random.Range(0, rooms.Count)];
+                
+                if (roomA != roomB)
+                {
+                    ConnectRooms(roomA, roomB);
+                }
+            }
+        }
+        
+        // タイル生成
+        GenerateTiles();
+        
+        // 血痕、棚、ドア配置
+        SpawnBloodStains();
+        SpawnShelves();
+        SpawnDoors();
+        
+        // Fog生成
+        GenerateFog();
+        
+        // プレイヤーとエネミー配置
+        SpawnPlayer();
+        SpawnEnemies();
+    }
+    
+    // ... existing helper methods ...
+    
+    private void GenerateFog()
+    {
+        if (!useFogOfWar || floorPrefab == null) return;
+        
+        fogGrid = new GameObject[gridWidth, gridHeight];
+        
+        for (int x = 0; x < gridWidth; x++)
+        {
+            for (int y = 0; y < gridHeight; y++)
+            {
+                Vector3 pos = new Vector3(x * tileSize, y * tileSize, -5f); // 手前に表示
+                GameObject fog = Instantiate(floorPrefab, pos, Quaternion.identity, transform);
+                fog.name = $"Fog_{x}_{y}";
+                
+                SpriteRenderer sr = fog.GetComponent<SpriteRenderer>();
+                if (sr != null)
+                {
+                    sr.color = Color.black;
+                    sr.sortingOrder = 100; // 最前面に表示
+                }
+                
+                // コライダーがあれば無効化（移動の邪魔にならないように）
+                Collider2D col = fog.GetComponent<Collider2D>();
+                if (col != null)
+                {
+                    col.enabled = false;
+                }
+                
+                fogGrid[x, y] = fog;
+            }
+        }
+    }
+    
+    public void RevealMap(Vector3 position)
+    {
+        if (!useFogOfWar || fogGrid == null) return;
+        
+        int cx = Mathf.RoundToInt(position.x / tileSize);
+        int cy = Mathf.RoundToInt(position.y / tileSize);
+        
+        // 3x3の範囲をクリア
+        for (int x = cx - 1; x <= cx + 1; x++)
+        {
+            for (int y = cy - 1; y <= cy + 1; y++)
+            {
+                if (x >= 0 && x < gridWidth && y >= 0 && y < gridHeight)
+                {
+                    if (fogGrid[x, y] != null)
+                    {
+                        Destroy(fogGrid[x, y]);
+                        fogGrid[x, y] = null;
+                        if (GameUIManager.Instance != null) GameUIManager.Instance.AddScore(10);
+                    }
+                }
+            }
+        }
+    }
+
+    public void RevealRandomAreas(int areaCount)
+    {
+        if (!useFogOfWar || fogGrid == null) return;
+
+        for (int i = 0; i < areaCount; i++)
+        {
+            Vector3 randomPos = GetRandomWalkablePosition();
+            // RevealMap already reveals a 3x3 area around the position
+            RevealMap(randomPos);
+        }
+        
+        Debug.Log($"[DungeonGeneratorV2] Revealed {areaCount} random areas.");
+    }
+    
+    public bool IsPositionRevealed(Vector3 position)
+    {
+        if (!useFogOfWar || fogGrid == null) return true; // Fogが無効なら常に「見えている」扱い
+        
+        int x = Mathf.RoundToInt(position.x / tileSize);
+        int y = Mathf.RoundToInt(position.y / tileSize);
+        
+        if (x < 0 || x >= gridWidth || y < 0 || y >= gridHeight) return false;
+        
+        // fogGrid[x,y] が null なら霧が晴れている（Destroy済み）
+        return fogGrid[x, y] == null;
+    }
+    
+    private bool RoomsOverlap(Room a, Room b)
+    {
+        return !(a.x + a.width + 1 < b.x || b.x + b.width + 1 < a.x ||
+                 a.y + a.height + 1 < b.y || b.y + b.height + 1 < a.y);
+    }
+    
+    private void CreateRoom(Room room)
+    {
+        for (int x = room.x; x < room.x + room.width; x++)
+        {
+            for (int y = room.y; y < room.y + room.height; y++)
+            {
+                grid[x, y] = 0; // 0 = 床
+            }
+        }
+    }
+    
+    private void ConnectRooms(Room a, Room b)
+    {
+        Vector2Int centerA = a.Center();
+        Vector2Int centerB = b.Center();
+        
+        int x = centerA.x;
+        int y = centerA.y;
+        
+        while (x != centerB.x)
+        {
+            SetFloor(x, y);
+            x += (centerB.x > x) ? 1 : -1;
+        }
+        
+        while (y != centerB.y)
+        {
+            SetFloor(x, y);
+            y += (centerB.y > y) ? 1 : -1;
+        }
+    }
+
+    private void SetFloor(int x, int y)
+    {
+        // 2x2のブラシサイズで床を塗る（通路を2マス幅にするため）
+        for (int i = 0; i <= 1; i++)
+        {
+            for (int j = 0; j <= 1; j++)
+            {
+                int nx = x + i;
+                int ny = y + j;
+                
+                // グリッド範囲内かチェック（外周の壁は残すため範囲を厳しくする）
+                if (nx >= 1 && nx < gridWidth - 1 && ny >= 1 && ny < gridHeight - 1)
+                {
+                    grid[nx, ny] = 0;
+                }
+            }
+        }
+    }
+    
+    private void GenerateTiles()
+    {
+        for (int x = 0; x < gridWidth; x++)
+        {
+            for (int y = 0; y < gridHeight; y++)
+            {
+                Vector3 pos = new Vector3(x * tileSize, y * tileSize, 0);
+                
+                if (grid[x, y] == 0)
+                {
+                    if (floorPrefab != null)
+                    {
+                        GameObject floor = Instantiate(floorPrefab, pos, Quaternion.identity, transform);
+                        floor.name = $"Floor_{x}_{y}";
+                    }
+                }
+                else if (grid[x, y] == 1)
+                {
+                    if (wallPrefab != null && !IsInteriorWall(x, y))
+                    {
+                        GameObject wall = Instantiate(wallPrefab, pos, Quaternion.identity, transform);
+                        wall.name = $"Wall_{x}_{y}";
+                        wall.tag = "Wall";
+                    }
+                }
+            }
+        }
+    }
+    
+    private bool IsInteriorWall(int x, int y)
+    {
+        int floorNeighbors = 0;
+        
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                if (dx == 0 && dy == 0) continue;
+                
+                int nx = x + dx;
+                int ny = y + dy;
+                
+                if (nx >= 0 && nx < gridWidth && ny >= 0 && ny < gridHeight)
+                {
+                    if (grid[nx, ny] == 0)
+                    {
+                        floorNeighbors++;
+                    }
+                }
+            }
+        }
+        
+        return floorNeighbors == 0;
+    }
+    
+    private void SpawnBloodStains()
+    {
+        if (bloodPrefab == null) return;
+        
+        for (int x = 0; x < gridWidth; x++)
+        {
+            for (int y = 0; y < gridHeight; y++)
+            {
+                if (grid[x, y] == 0 && Random.value < bloodSpawnChance)
+                {
+                    Vector3 pos = new Vector3(x * tileSize, y * tileSize, -0.5f);
+                    GameObject blood = Instantiate(bloodPrefab, pos, Quaternion.identity, transform);
+                    blood.name = $"Blood_{x}_{y}";
+                }
+            }
+        }
+    }
+    
+    private void SpawnShelves()
+    {
+        if (shelfPrefab == null) return;
+        
+        List<InteractableShelf> allShelves = new List<InteractableShelf>();
+
+        foreach (Room room in rooms)
+        {
+            List<Vector2Int> validPositions = new List<Vector2Int>();
+            
+            // 部屋の外周（壁際）の座標をリストアップ
+            // 左端と右端の列
+            for (int y = room.y; y < room.y + room.height; y++)
+            {
+                CheckAndAddShelfPosition(room.x, y, -1, 0, validPositions); // 左端
+                CheckAndAddShelfPosition(room.x + room.width - 1, y, 1, 0, validPositions); // 右端
+            }
+            
+            // 上端と下端の行（角は重複するがList.Containsなどで弾くか、ループ範囲を調整）
+            // ここではループ範囲を調整して角重複を防ぐ（yは既に処理済みなので、xの範囲を狭める）
+            for (int x = room.x + 1; x < room.x + room.width - 1; x++)
+            {
+                CheckAndAddShelfPosition(x, room.y, 0, -1, validPositions); // 下端
+                CheckAndAddShelfPosition(x, room.y + room.height - 1, 0, 1, validPositions); // 上端
+            }
+            
+            int shelfCount = Random.Range(minShelvesPerRoom, maxShelvesPerRoom + 1);
+            
+            // ランダムに選んで配置
+            for (int i = 0; i < shelfCount && validPositions.Count > 0; i++)
+            {
+                int index = Random.Range(0, validPositions.Count);
+                Vector2Int pos = validPositions[index];
+                validPositions.RemoveAt(index);
+                
+                Vector3 worldPos = new Vector3(pos.x * tileSize, pos.y * tileSize, -0.5f);
+                GameObject shelf = Instantiate(shelfPrefab, worldPos, Quaternion.identity, transform);
+                shelf.name = $"Shelf_{pos.x}_{pos.y}";
+                
+                // インタラクション機能の追加
+                if (shelfSearchedSprite != null)
+                {
+                    InteractableShelf interactable = shelf.AddComponent<InteractableShelf>();
+                    interactable.Setup(shelfSearchedSprite);
+                    
+                    // 1. Try Singleton
+                    if (itemManager == null) itemManager = ItemDatabase.Instance;
+                    // 2. Try FindObject
+                    if (itemManager == null) itemManager = Object.FindFirstObjectByType<ItemDatabase>();
+
+                    if (itemManager != null)
+                    {
+                        interactable.SetDropTable(itemManager.shelfDropTable);
+                        // Only log once to avoid spamming
+                        if (i == 0) Debug.Log($"[DungeonGeneratorV2] Assigned DropTable to shelves. Item Count: {itemManager.shelfDropTable.Count}");
+                    }
+                    else
+                    {
+                         Debug.LogError("[DungeonGeneratorV2] CRITICAL: ItemDatabase not found! Using 'ItemDatabase' component?");
+                    }
+                    allShelves.Add(interactable);
+                    
+                    // コライダーがないと検知できないので追加
+                    BoxCollider2D col = shelf.GetComponent<BoxCollider2D>();
+                    if (col == null)
+                    {
+                        col = shelf.AddComponent<BoxCollider2D>();
+                    }
+                    col.isTrigger = true; // 通行は妨げないが検知はする
+                }
+            }
+        }
+
+        // Assign Key to one random shelf
+        if (allShelves.Count > 0)
+        {
+            int keyIndex = Random.Range(0, allShelves.Count);
+            InteractableShelf keyShelf = allShelves[keyIndex];
+            keyShelf.SetFixedItem("key");
+            Debug.Log($"[DungeonGeneratorV2] KEY hidden in shelf at {keyShelf.transform.position}");
+        }
+        else
+        {
+            Debug.LogError("[DungeonGeneratorV2] No shelves spawned! Key cannot be placed.");
+        }
+    }
+
+    private void CheckAndAddShelfPosition(int x, int y, int dirX, int dirY, List<Vector2Int> validPositions)
+    {
+        // その場所自体が床であることを確認（念のため）
+        if (grid[x, y] != 0) return;
+
+        // 壁の「裏側」（部屋の外）を確認
+        int checkX = x + dirX;
+        int checkY = y + dirY;
+        
+        // グリッド範囲内かチェック
+        if (checkX >= 0 && checkX < gridWidth && checkY >= 0 && checkY < gridHeight)
+        {
+            // 壁の裏が「壁(1)」なら配置OK。「床(0)」なら通路なのでNG
+            if (grid[checkX, checkY] == 1)
+            {
+                validPositions.Add(new Vector2Int(x, y));
+            }
+        }
+    }
+    
+    private void SpawnDoors()
+    {
+        if (doorPrefab1 == null && doorPrefab2 == null) return;
+        
+        // ドアを配置できる部屋の候補リスト（開始部屋[0]以外）
+        List<int> availableRoomIndices = new List<int>();
+        for (int i = 1; i < rooms.Count; i++)
+        {
+            availableRoomIndices.Add(i);
+        }
+        
+        // 候補がない場合は終了
+        if (availableRoomIndices.Count == 0) return;
+        
+        // 1. Shop Door (50% chance)
+        if (doorPrefab2 != null && Random.value < shopDoorChance)
+        {
+            int randomIndex = Random.Range(0, availableRoomIndices.Count);
+            int roomIndex = availableRoomIndices[randomIndex];
+            
+            SpawnDoorAtRoom(roomIndex, doorPrefab2, "DoorShop");
+            
+            // 使用した部屋をリストから削除
+            availableRoomIndices.RemoveAt(randomIndex);
+        }
+        
+        // 2. Normal Door (100% chance)
+        if (doorPrefab1 != null && availableRoomIndices.Count > 0)
+        {
+            int randomIndex = Random.Range(0, availableRoomIndices.Count);
+            int roomIndex = availableRoomIndices[randomIndex];
+            
+            SpawnDoorAtRoom(roomIndex, doorPrefab1, "DoorNormal");
+        }
+    }
+    
+    private void SpawnDoorAtRoom(int roomIndex, GameObject prefab, string nameSuffix)
+    {
+        Room room = rooms[roomIndex];
+        Vector2Int center = room.Center();
+        Vector3 pos = new Vector3(center.x * tileSize, center.y * tileSize, -0.5f);
+        GameObject door = Instantiate(prefab, pos, Quaternion.identity, transform);
+        door.name = $"Door_Room{roomIndex}_{nameSuffix}";
+
+        // Ensure door has a trigger collider for detection
+        BoxCollider2D col = door.GetComponent<BoxCollider2D>();
+        if (col == null)
+        {
+            col = door.AddComponent<BoxCollider2D>();
+        }
+        col.isTrigger = true;
+    }
+    
+    private void SpawnPlayer()
+    {
+        if (rooms.Count == 0) return;
+        
+        Room startRoom = rooms[0];
+        Vector2Int center = startRoom.Center();
+        Vector3 spawnPos = new Vector3(center.x * tileSize, center.y * tileSize, -1f);
+        
+        if (playerObject == null)
+        {
+            playerObject = GameObject.FindGameObjectWithTag("Player");
+        }
+        
+        if (playerObject != null)
+        {
+            PlayerMovement playerMovement = playerObject.GetComponent<PlayerMovement>();
+            if (playerMovement != null)
+            {
+                playerMovement.InitializePosition(spawnPos);
+            }
+            else
+            {
+                playerObject.transform.position = spawnPos;
+            }
+            
+            // アニメーションコンポーネントの追加/設定
+            if (playerIdleSprite2 != null)
+            {
+                BreathingAnimation anim = playerObject.GetComponent<BreathingAnimation>();
+                if (anim == null)
+                {
+                    anim = playerObject.AddComponent<BreathingAnimation>();
+                }
+                
+                SpriteRenderer sr = playerObject.GetComponent<SpriteRenderer>();
+                if (sr != null)
+                {
+                    sr.sortingOrder = 10; // プレイヤーは手前
+                    anim.Setup(sr.sprite, playerIdleSprite2);
+                }
+            }
+            
+            Debug.Log($"Player spawned at tile: ({center.x}, {center.y}) position: {spawnPos}");
+        }
+    }
+    
+    private void SpawnEnemies()
+    {
+        if (enemyPrefab == null)
+        {
+            Debug.LogWarning("Enemy prefab not assigned in Inspector!");
+            return;
+        }
+        
+        int enemyCount = Random.Range(minEnemies, maxEnemies + 1);
+        int spawned = 0;
+
+        Vector2Int playerPos = (rooms.Count > 0) ? rooms[0].Center() : new Vector2Int(-1, -1);
+        
+        for (int i = 0; i < enemyCount && i < rooms.Count; i++)
+        {
+            Room room = rooms[i];
+            
+            for (int attempt = 0; attempt < 10; attempt++)
+            {
+                int x = Random.Range(room.x + 1, room.x + room.width - 1);
+                int y = Random.Range(room.y + 1, room.y + room.height - 1);
+
+                // プレイヤーと同じ位置ならスキップ
+                if (i == 0 && x == playerPos.x && y == playerPos.y)
+                {
+                    continue;
+                }
+                
+                if (IsTileWalkable(x, y))
+                {
+                    Vector3 pos = new Vector3(x * tileSize, y * tileSize, -1f);
+                    GameObject enemy = Instantiate(enemyPrefab, pos, Quaternion.identity, transform);
+                    enemy.name = $"Mortipack_{spawned}";
+                    
+                    // アニメーション追加
+                    if (enemyIdleSprite2 != null)
+                    {
+                        BreathingAnimation anim = enemy.AddComponent<BreathingAnimation>();
+                        SpriteRenderer sr = enemy.GetComponent<SpriteRenderer>();
+                        if (sr != null)
+                        {
+                            sr.sortingOrder = 20; // プレイヤー(10)や障害物より上に表示
+                            anim.Setup(sr.sprite, enemyIdleSprite2);
+                        }
+                    }
+                    
+                    EnemyMovement enemyMovement = enemy.GetComponent<EnemyMovement>();
+                    if (enemyMovement != null)
+                    {
+                        if (turnManager != null)
+                        {
+                            turnManager.RegisterEnemy(enemyMovement);
+                        }
+                        
+                        // Setup Dance Sprite
+                        enemyMovement.SetupDance(enemyDanceSprite);
+                    }
+
+                    // Ensure Enemy has a Collider for detection
+                    BoxCollider2D col = enemy.GetComponent<BoxCollider2D>();
+                    if (col == null)
+                    {
+                        col = enemy.AddComponent<BoxCollider2D>();
+                    }
+                    col.isTrigger = true; // Make it a trigger so it doesn't physically block, but triggers events
+                    
+                    Debug.Log($"Enemy spawned at: ({x}, {y})");
+                    spawned++;
+                    break;
+                }
+            }
+        }
+        
+        Debug.Log($"Total enemies spawned: {spawned}");
+    }
+    
+    public bool IsWorldPositionWalkable(Vector3 worldPosition)
+    {
+        int x = Mathf.RoundToInt(worldPosition.x / tileSize);
+        int y = Mathf.RoundToInt(worldPosition.y / tileSize);
+        return IsTileWalkable(x, y);
+    }
+
+    public bool IsTileWalkable(int x, int y)
+    {
+        if (x < 0 || x >= gridWidth || y < 0 || y >= gridHeight)
+        {
+            return false;
+        }
+        
+        return grid[x, y] == 0;
+    }
+    public void ActivateRadar(int turns)
+    {
+        radarTurnsRemaining = turns;
+        RevealAllEnemiesOverFog();
+        Debug.Log($"[DungeonGeneratorV2] Radar activated for {turns} turns.");
+    }
+
+    private void RevealAllEnemiesOverFog()
+    {
+        EnemyMovement[] enemies = FindObjectsOfType<EnemyMovement>();
+        foreach (var enemy in enemies)
+        {
+            SpriteRenderer sr = enemy.GetComponent<SpriteRenderer>();
+            if (sr != null)
+            {
+                // Fog is Order 100. Set enemy to 101 to be visible on top.
+                sr.sortingOrder = 101; 
+            }
+        }
+    }
+    
+    private void ResetEnemiesUnderFog()
+    {
+        EnemyMovement[] enemies = FindObjectsOfType<EnemyMovement>();
+        foreach (var enemy in enemies)
+        {
+            SpriteRenderer sr = enemy.GetComponent<SpriteRenderer>();
+            if (sr != null)
+            {
+                // Default Enemy Sorting Order is 20 (as per SpawnEnemies)
+                sr.sortingOrder = 20; 
+            }
+        }
+        Debug.Log("[DungeonGeneratorV2] Radar effect expired. Enemies hidden under fog.");
+    }
+    public void SpawnShopDoorAt(Vector3 position)
+    {
+        if (doorPrefab2 == null || rooms == null || rooms.Count == 0) return;
+
+        int x = Mathf.RoundToInt(position.x / tileSize);
+        int y = Mathf.RoundToInt(position.y / tileSize);
+        
+        // Find which room contains this point (or closest)
+        Room targetRoom = null;
+        float minDistSq = float.MaxValue;
+
+        foreach (var room in rooms)
+        {
+            // Center of room in grid coords
+            Vector2Int center = room.Center();
+            float distSq = (center.x - x) * (center.x - x) + (center.y - y) * (center.y - y);
+            
+            // Check if point is inside room
+            if (x >= room.x && x < room.x + room.width && y >= room.y && y < room.y + room.height)
+            {
+                targetRoom = room;
+                break;
+            }
+            
+            // Track closest just in case we are in a corridor
+            if (distSq < minDistSq)
+            {
+                minDistSq = distSq;
+                targetRoom = room;
+            }
+        }
+        
+        if (targetRoom != null)
+        {
+            Vector2Int center = targetRoom.Center();
+            Vector3 finalSpawnPos = Vector3.zero;
+            bool foundValidPos = false;
+
+            // Search priority: Center -> Up/Down/Left/Right -> Diagonals
+            Vector2Int[] checkOffsets = new Vector2Int[] 
+            { 
+                Vector2Int.zero, 
+                Vector2Int.up, Vector2Int.down, Vector2Int.left, Vector2Int.right,
+                new Vector2Int(1, 1), new Vector2Int(1, -1), new Vector2Int(-1, 1), new Vector2Int(-1, -1)
+            };
+
+            foreach(var offset in checkOffsets)
+            {
+                int checkX = center.x + offset.x;
+                int checkY = center.y + offset.y;
+                
+                // 1. Check if Tile is Walkable (Floor) using Grid
+                if (!IsTileWalkable(checkX, checkY)) continue;
+
+                Vector3 worldPos = new Vector3(checkX * tileSize, checkY * tileSize, -0.5f);
+
+                // 2. Check for Overlaps (Existing Doors, Shelves)
+                Collider2D[] hits = Physics2D.OverlapCircleAll(worldPos, 0.3f);
+                bool occupied = false;
+                foreach(var hit in hits)
+                {
+                    // Check for Doors or Shelves
+                    if (hit.name.Contains("Door") || hit.GetComponent<InteractableShelf>() != null)
+                    {
+                        occupied = true;
+                        break;
+                    }
+                }
+
+                if (!occupied)
+                {
+                    finalSpawnPos = worldPos;
+                    foundValidPos = true;
+                    // Debug.Log($"[DungeonGeneratorV2] Found valid spawn pos at {finalSpawnPos} (Offset: {offset})");
+                    break;
+                }
+            }
+
+            if (foundValidPos)
+            {
+                GameObject door = Instantiate(doorPrefab2, finalSpawnPos, Quaternion.identity, transform);
+                door.name = $"Door_Shop_Summoned_{center.x}_{center.y}";
+                
+                BoxCollider2D col = door.GetComponent<BoxCollider2D>();
+                if (col == null)
+                {
+                    col = door.AddComponent<BoxCollider2D>();
+                }
+                col.isTrigger = true;
+                
+                Debug.Log($"[DungeonGeneratorV2] Shop Door Summoned at {finalSpawnPos}");
+            }
+            else
+            {
+                Debug.LogWarning("[DungeonGeneratorV2] Could not find empty spot for Shop Door in room!");
+            }
+        }
+    }
+
+    public int BanishEnemies()
+    {
+        EnemyMovement[] enemies = FindObjectsOfType<EnemyMovement>();
+        if (enemies.Length == 0) return 0;
+
+        // Weight Logic: 1->50%, 2->30%, 3->20%
+        int countToRemove = 1;
+        float roll = Random.value;
+        if (roll < 0.5f) countToRemove = 1;       // 0.0 - 0.5
+        else if (roll < 0.8f) countToRemove = 2;  // 0.5 - 0.8
+        else countToRemove = 3;                   // 0.8 - 1.0
+
+        int removedCount = 0;
+        List<EnemyMovement> enemyList = new List<EnemyMovement>(enemies);
+        
+        while (countToRemove > 0 && enemyList.Count > 0)
+        {
+            int index = Random.Range(0, enemyList.Count);
+            EnemyMovement target = enemyList[index];
+            
+            // Effect Implementation (Visuals could be added here if needed)
+            Destroy(target.gameObject);
+            
+            enemyList.RemoveAt(index);
+            countToRemove--;
+            removedCount++;
+        }
+        
+        Debug.Log($"[DungeonGeneratorV2] Banished {removedCount} enemies (Rolled for {countToRemove + removedCount}).");
+        return removedCount;
+    }
+
+#if UNITY_EDITOR
+    private void OnValidate()
+    {
+        if (enemyDanceSprite == null)
+        {
+             enemyDanceSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Sprites/mortipack03.png");
+             if (enemyDanceSprite != null)
+             {
+                 Debug.Log("[DungeonGeneratorV2] Auto-assigned 'enemyDanceSprite' to mortipack03.png");
+             }
+        }
+    }
+#endif
+}
+
+

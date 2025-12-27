@@ -1,0 +1,24 @@
+fileFormatVersion: 2
+guid: d312fdbc686b7714b99d02c84442bfe6
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - bgmSource: {instanceID: 0}
+  - defaultBGM: {fileID: 8300000, guid: 62e4a9ed94f3b5d4a8b5a29f42c44a41, type: 3}
+  - seSource: {instanceID: 0}
+  - searchSE: {fileID: 8300000, guid: 099e53257bd883a4eaf36f82676deaca, type: 3}
+  - getSE: {fileID: 8300000, guid: 56e23239374b01444a444ef52c9c9cd6, type: 3}
+  - walkSE: {instanceID: 0}
+  - bumpSE: {instanceID: 0}
+  - doorSE: {fileID: 8300000, guid: 62f3e9949ea78b446a05b667169acea3, type: 3}
+  - deadSE: {fileID: 8300000, guid: 7820d6a1c6878b64186a7da954f6325b, type: 3}
+  - warpSE: {fileID: 8300000, guid: 4e6486b6610f86543b81f1b41889c309, type: 3}
+  - radioSE: {fileID: 8300000, guid: f1dd09e5a0c433645abb81ac780553ab, type: 3}
+  - radarSE: {fileID: 8300000, guid: bab2c2d39bef9f9408ed561aba7c225e, type: 3}
+  - migawariSE: {fileID: 8300000, guid: b14be4a4b664dba40b67b87ba14a5c51, type: 3}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
