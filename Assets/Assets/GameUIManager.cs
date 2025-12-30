@@ -27,38 +27,21 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
     }
 
     [SerializeField] private Text messageText;
+    [SerializeField] private Text itemNameText; // Added for explicit item name display
+    [SerializeField] private Text floorText;
+    [SerializeField] private GameObject resultScreenPanel;
+    [SerializeField] private Text resultTotalScoreText;
+    [SerializeField] private Text resultStageScoreText;
+    [SerializeField] private Button nextFloorButton;
+    [SerializeField] private RectTransform uiBoxItem;
+    [SerializeField] private RectTransform uiBoxKey;
+    [SerializeField] private Image loadingOverlay; // Reverted to Image for compatibility
 
     [SerializeField] private Canvas canvas;
     [SerializeField] private Font customFont;
-    [SerializeField] private Text floorText;
-    [SerializeField] private GameObject resultScreenPanel;
-    [SerializeField] private Button nextFloorButton;
-    private Image loadingOverlay;
+    // private Image loadingOverlay; // This is now serialized as a GameObject above
 
-    private void CreateLoadingOverlay()
-    {
-        if (canvas == null) return;
-        Transform existing = canvas.transform.Find("LoadingOverlay");
-        if (existing != null)
-        {
-            loadingOverlay = existing.GetComponent<Image>();
-        }
-        else
-        {
-            GameObject overlayObj = new GameObject("LoadingOverlay");
-            overlayObj.transform.SetParent(canvas.transform, false);
-            loadingOverlay = overlayObj.AddComponent<Image>();
-            loadingOverlay.color = Color.black;
-            loadingOverlay.raycastTarget = true; // Block input
-            
-            RectTransform rt = loadingOverlay.rectTransform;
-            rt.anchorMin = Vector2.zero;
-            rt.anchorMax = Vector2.one;
-            rt.sizeDelta = Vector2.zero;
-        }
-        // Initially active to hide scene load artifacts
-        if (loadingOverlay != null) loadingOverlay.gameObject.SetActive(true);
-    }
+    // [Removed unused CreateLoadingOverlay method]
 
     public int CurrentFloor { get; private set; } = 1;
     
@@ -73,10 +56,9 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         if (_instance == null)
         {
             _instance = this;
-            transform.SetParent(null);
-            DontDestroyOnLoad(gameObject);
             SceneManager.sceneLoaded += OnSceneLoaded;
-            Debug.Log("[GameUIManager] Initialized as singleton and set to DontDestroyOnLoad.");
+            Debug.Log("[GameUIManager] Initialized singleton.");
+            HandlePersistentUI();
         }
         else if (_instance != this)
         {
@@ -85,23 +67,105 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
             return;
         }
     }
+
+    private static GameObject persistentUIRoot; // Static reference to the keeper
+
+    private void HandlePersistentUI()
+    {
+        // Robustly find ALL MobileControllers to handle duplicates
+        // Note: GameObject.Find only returns one. We need to check everything.
+        // Since MobileController is usually a root object:
+        
+        List<GameObject> roots = new List<GameObject>();
+        SceneManager.GetActiveScene().GetRootGameObjects(roots);
+        
+        GameObject foundKeeper = null;
+        
+        foreach (GameObject root in roots)
+        {
+            if (root.name == "MobileController")
+            {
+                if (persistentUIRoot == null)
+                {
+                    // This is our first one, keep it
+                    persistentUIRoot = root;
+                    DontDestroyOnLoad(root);
+                    Debug.Log($"[GameUIManager] Set {root.name} as Persistent Root.");
+                    foundKeeper = root;
+                }
+                else if (root != persistentUIRoot)
+                {
+                    // This is a duplicate (newly loaded scene version), destroy it
+                    Debug.Log($"[GameUIManager] Destroying duplicate MobileController in new scene: {root.name}");
+                    Destroy(root);
+                }
+                else
+                {
+                    foundKeeper = root;
+                }
+            }
+        }
+        
+        // If we didn't find the keeper in this scene's roots (because it's in DDOL scene), that's fine.
+        // But we must ensure foundKeeper is set if we are capable of finding it.
+        // Actually, DDOL objects are not in the Active Scene's root list usually. 
+        // So the loop above mainly finds duplication in the NEW scene.
+        
+        // Special case: If we are logic-only GameUIManager (Separate), check self persistence
+        if (persistentUIRoot != null && !transform.IsChildOf(persistentUIRoot.transform) && transform.parent == null)
+        {
+             DontDestroyOnLoad(gameObject);
+        }
+    }
+    
+    private void AssignCameraToCanvas()
+    {
+        if (canvas == null) return;
+        
+        if (canvas.renderMode == RenderMode.ScreenSpaceCamera || canvas.renderMode == RenderMode.WorldSpace)
+        {
+            if (canvas.worldCamera == null)
+            {
+                Camera mainCam = Camera.main;
+                if (mainCam != null)
+                {
+                    canvas.worldCamera = mainCam;
+                    canvas.planeDistance = 10; // Ensure visible
+                    Debug.Log($"[GameUIManager] Assigned Camera {mainCam.name} to persistent Canvas.");
+                }
+                else
+                {
+                    // Fallback search
+                    GameObject camObj = GameObject.Find("MobileGameCamera"); // Check your camera name
+                    if (camObj != null) 
+                    {
+                        canvas.worldCamera = camObj.GetComponent<Camera>();
+                        Debug.Log("[GameUIManager] Assigned MobileGameCamera found by name.");
+                    }
+                }
+            }
+        }
+    }
     
     // ... (Existing code) ...
 
     private void UpdateFloorText()
     {
+        if (floorText == null) InitializeUI();
+
         if (floorText != null)
         {
-            // Format: Score:100 (Stage:100) B1
-            floorText.text = $"Score:{TotalScore} (Stage:{StageScore}) B{CurrentFloor}";
-            // Reduce font size slightly if text gets too long, or rely on AutoSizing if set (currently using fixed 48)
-            // For now, assume it fits or text wrap handles it (though right aligned).
+            // Format: Score:100 B1 (Shows Stage Score only per user request)
+            floorText.text = $"Score:{StageScore} B{CurrentFloor}";
+            // Ensure visible
+            if (!floorText.gameObject.activeInHierarchy) floorText.gameObject.SetActive(true);
         }
     }
     
     public void AddScore(int points)
     {
-        TotalScore += points;
+        // Only add to Stage Score
+        // TotalScore += points;
         StageScore += points;
         UpdateFloorText();
         Debug.Log($"[Score] Added {points}. Total: {TotalScore}, Stage: {StageScore}");
@@ -116,8 +180,8 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
 
     private System.Collections.IEnumerator LoadNextFloorRoutine()
     {
-        // Bonus for Stage Clear
-        AddScore(300);
+        // Bonus moved to ShowResultScreen
+        // AddScore(300);
         
         // Show Loading Overlay (Fake fade out)
         if (loadingOverlay != null)
@@ -136,8 +200,9 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         
         if (InventoryManager.Instance != null) InventoryManager.Instance.RemoveItem("key");
         
-        // Hide ResultScreen before scene transition to prevent it from persisting
-        if (resultScreenPanel != null) resultScreenPanel.SetActive(false);
+        // Hide ResultScreen before scene transition? NO, keep it to cover the map!
+        // if (resultScreenPanel != null) resultScreenPanel.SetActive(false);
+        isTransitioningToNextFloor = true; 
         
         // Re-enable player input for the new scene
         PlayerMovement pm = FindObjectOfType<PlayerMovement>();
@@ -171,8 +236,41 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         if (loadingOverlay != null) loadingOverlay.gameObject.SetActive(false);
     }
 
-    [SerializeField] private RectTransform uiBoxItem;
-    [SerializeField] private RectTransform uiBoxKey; // 鍵専用のボックス
+    private IEnumerator FadeOutResultScreen()
+    {
+        if (resultScreenPanel == null) yield break;
+        
+        // Ensure CanvasGroup
+        CanvasGroup cg = resultScreenPanel.GetComponent<CanvasGroup>();
+        if (cg == null) cg = resultScreenPanel.AddComponent<CanvasGroup>();
+        
+        cg.alpha = 1.0f;
+        resultScreenPanel.SetActive(true);
+
+        // Wait to ensure map/fog is ready
+        yield return new WaitForSeconds(0.5f);
+
+        float duration = 1.0f;
+        float elapsed = 0f;
+
+        while (elapsed < duration)
+        {
+             elapsed += Time.deltaTime;
+             float t = elapsed / duration;
+             cg.alpha = Mathf.Lerp(1.0f, 0f, t);
+             yield return null;
+        }
+
+        cg.alpha = 1.0f; // Reset for next time
+        resultScreenPanel.SetActive(false);
+        isTransitioningToNextFloor = false; // Reset flag
+    }
+    
+    // Flag to track transition state
+    private bool isTransitioningToNextFloor = false;
+
+
+
 
     private bool isInventoryConnected = false;
 
@@ -211,6 +309,9 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
     {
         Debug.Log($"[GameUIManager] OnSceneLoaded: {scene.name}");
         
+        // Cleanup duplicates from new scene
+        HandlePersistentUI();
+        
         // Reset connection flag to ensure event is re-subscribed if needed
         // (InventoryManager is also DontDestroyOnLoad, so the event might be stale)
         if (InventoryManager.Instance != null && !isInventoryConnected)
@@ -227,8 +328,31 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         
         UpdateInventoryUI(); // Force refresh to prevent empty inventory flicker
         
+        UpdateInventoryUI(); // Force refresh to prevent empty inventory flicker
+        
+        AssignCameraToCanvas(); // Ensure camera is hooked up
+        
         // Match transition timing with LoadingOverlay
-        StartCoroutine(FadeInRoutine());
+        if (isTransitioningToNextFloor)
+        {
+            // Use ResultScreen as cover
+             if (resultScreenPanel != null)
+             {
+                 resultScreenPanel.SetActive(true);
+                 // Disable interaction again just in case (e.g. NextButton)
+                 if (nextFloorButton != null) nextFloorButton.interactable = true; // Reset button
+                 StartCoroutine(FadeOutResultScreen());
+             }
+             else
+             {
+                 // Fallback to overlay if result screen missing
+                 StartCoroutine(FadeInRoutine());
+             }
+        }
+        else
+        {
+            StartCoroutine(FadeInRoutine());
+        }
     }
     
     private void EnsureUIActive()
@@ -266,14 +390,15 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
             Debug.Log("[GameUIManager] Reactivated uiBoxKey.");
         }
         
-        // Ensure MessageText is active
-        if (messageText != null && !messageText.gameObject.activeInHierarchy)
+        // Hide MessageText on load (User request: Start hidden)
+        if (messageText != null)
         {
-            messageText.gameObject.SetActive(true);
+            messageText.gameObject.SetActive(false);
+            messageText.text = ""; // Clear text too
         }
         
-        // Ensure ResultScreen is hidden (should not persist across scene loads)
-        if (resultScreenPanel != null && resultScreenPanel.activeInHierarchy)
+        // Ensure ResultScreen is hidden (should not persist across scene loads UNLESS transitioning)
+        if (!isTransitioningToNextFloor && resultScreenPanel != null && resultScreenPanel.activeInHierarchy)
         {
             resultScreenPanel.SetActive(false);
             Debug.Log("[GameUIManager] Hid ResultScreen on scene load.");
@@ -284,179 +409,96 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
     {
         Debug.Log("[GameUIManager] InitializeUI() started.");
 
-        // 1. Try to find existing assigned canvas
+        // 1. MobileUI (Canvas)
+        if (canvas == null)
+        {
+            GameObject mobileUIObj = GameObject.Find("MobileUI");
+            if (mobileUIObj != null)
+            {
+                // Verify it is part of MobileController
+                if (mobileUIObj.transform.parent != null && mobileUIObj.transform.parent.name == "MobileController")
+                {
+                   canvas = mobileUIObj.GetComponent<Canvas>();
+                }
+            }
+        }
+
         if (canvas != null)
         {
-             // Already assigned, just ensure it's active
-             canvas.gameObject.SetActive(true);
-             Debug.Log($"[GameUIManager] Using assigned Canvas: {canvas.name}");
+            // 2. Bind FloorText (Created in TopBar)
+            // 2. Bind FloorText (Created in TopBar)
+            if (floorText == null)
+            {
+                Transform t = RecursiveFind(canvas.transform, "FloorText");
+                if (t != null) floorText = t.GetComponent<Text>();
+            }
+
+            // 3. Bind MessageText
+            if (messageText == null)
+            {
+                Transform t = RecursiveFind(canvas.transform, "MessageText");
+                if (t != null) messageText = t.GetComponent<Text>();
+            }
+
+            // 3b. Bind ItemNameText
+            if (itemNameText == null)
+            {
+                Transform t = RecursiveFind(canvas.transform, "ItemNameText");
+                if (t != null) itemNameText = t.GetComponent<Text>();
+            }
+
+            // 4. Bind Boxes
+            if (uiBoxItem == null)
+            {
+                Transform t = RecursiveFind(canvas.transform, "item_box");
+                if (t != null) uiBoxItem = t.GetComponent<RectTransform>();
+            }
+             if (uiBoxKey == null)
+            {
+                Transform t = RecursiveFind(canvas.transform, "key_box");
+                if (t != null) uiBoxKey = t.GetComponent<RectTransform>();
+            }
+            
+            // 5. ResultScreen (Player/OptionRoot/ResultScreen or MobileUI?)
+            // If ResultScreen is in Player/OptionRoot, we need to find Player first, OR we assume it's in Canvas.
+            // Since we reverted, original code looked in Canvas.
+            // If user has not created ResultScreen in MobileUI, this might fail unless it's in OptionRoot.
+            // For now, let's look in Canvas, and if not found, look in Player/OptionRoot just in case.
+            
+            if (resultScreenPanel == null)
+            {
+                Transform t = RecursiveFind(canvas.transform, "ResultScreen");
+                if (t == null)
+                {
+                     // Fallback check in Player
+                     GameObject player = GameObject.FindGameObjectWithTag("Player");
+                     if (player != null) t = RecursiveFind(player.transform, "ResultScreen");
+                }
+                
+                if (t != null)
+                {
+                    resultScreenPanel = t.gameObject;
+                    
+                    // Re-bind Button
+                    Transform btn = RecursiveFind(t, "NextButton");
+                    if (btn != null) nextFloorButton = btn.GetComponent<Button>();
+                    
+                    resultScreenPanel.SetActive(false);
+                }
+            }
         }
         else
         {
-            // 2. Search for MobileUI (Canvas) first as it is the main UI canvas
-            GameObject mobileUI = GameObject.Find("MobileUI");
-            if (mobileUI != null)
-            {
-                canvas = mobileUI.GetComponent<Canvas>();
-                if (canvas != null)
-                {
-                    Debug.Log("[GameUIManager] Found MobileUI Canvas.");
-                }
-            }
-
-            // 3. If not found, search for ANY Canvas
-            if (canvas == null)
-            {
-                canvas = FindObjectOfType<Canvas>();
-                if (canvas != null)
-                {
-                     Debug.Log($"[GameUIManager] Found a Canvas: {canvas.name}");
-                }
-            }
-
-            // 4. If still not found, create new one
-            if (canvas == null)
-            {
-                Debug.Log("[GameUIManager] No Canvas found, creating new one.");
-                CreateCanvas();
-            }
-        }
-        
-        // Ensure Canvas is persistent if it's not MobileUI (MobileUI is handled by MobileController)
-        // Adjust sorting order to be on top
-        if (canvas != null)
-        {
-            // Force high sorting order to be visible
-            canvas.sortingOrder = 32767;
+            Debug.LogError("[GameUIManager] MobileUI Canvas NOT found. UI will not work.");
         }
 
-        // Ensure EventSystem exists for UI interaction
-        if (FindObjectOfType<UnityEngine.EventSystems.EventSystem>() == null)
-        {
-            GameObject es = new GameObject("EventSystem");
-            es.AddComponent<UnityEngine.EventSystems.EventSystem>();
-            es.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
-            Debug.Log("[GameUIManager] Auto-created EventSystem.");
-        }
-
-        CreateLetterbox(); // Add Black Bars
-
-        // Validate assigned uiBoxItem (Ignore Prefab Assets)
-        if (uiBoxItem != null && !uiBoxItem.gameObject.scene.IsValid())
-        {
-            Debug.LogWarning("[GameUIManager] Assigned uiBoxItem is a Prefab Asset (not in scene). Ignoring and finding/creating new one.");
-            uiBoxItem = null;
-        }
-
-        // Find or Create UI_box_item
-        if (uiBoxItem == null)
-        {
-            uiBoxItem = FindOrCreateLoopBox("UI_box_item", new Vector2(0.5f, 0.8f), new Vector2(0.95f, 0.95f));
-        }
-
-        // Validate assigned uiBoxKey
-        if (uiBoxKey != null && !uiBoxKey.gameObject.scene.IsValid())
-        {
-             uiBoxKey = null;
-        }
-
-        // Find or Create UI_box_key
-        if (uiBoxKey == null)
-        {
-            // UI_box_keyの探索・作成
-            // 配置はユーザーの指定場所があるかもしれないので探索優先
-            uiBoxKey = FindOrCreateLoopBox("UI_box_key", new Vector2(0.05f, 0.8f), new Vector2(0.3f, 0.95f), true);
-        }
-
-        if (messageText == null)
-        {
-            Transform textObj = canvas.transform.Find("MessageText");
-            if (textObj != null)
-            {
-                messageText = textObj.GetComponent<Text>();
-            }
-            else
-            {
-                CreateMessageText();
-            }
-        }
-        
-        // Clear initial text to prevent "Material obtained" message on start
-        if (messageText != null)
-        {
-            messageText.text = "";
-        }
-        
-
-
-        if (floorText == null)
-        {
-             Transform floorObj = canvas.transform.Find("FloorText");
-             if (floorObj != null)
-             {
-                 floorText = floorObj.GetComponent<Text>();
-             }
-             else
-             {
-                 CreateFloorText();
-             }
-        }
-        UpdateFloorText();
-
-        if (resultScreenPanel == null)
-        {
-            Transform resultObj = canvas.transform.Find("ResultScreen");
-            if (resultObj != null)
-            {
-                resultScreenPanel = resultObj.gameObject;
-                Transform btnObj = resultScreenPanel.transform.Find("NextButton");
-                if (btnObj != null) nextFloorButton = btnObj.GetComponent<Button>();
-            }
-            else
-            {
-                CreateResultScreen();
-            }
-            
-            // ResultScreen should be hidden at start of level
-            if (resultScreenPanel != null) resultScreenPanel.SetActive(false);
-        }
-
-        // Ensure button functionality regardless of how it was created/assigned
         if (nextFloorButton != null)
         {
             nextFloorButton.onClick.RemoveAllListeners();
             nextFloorButton.onClick.AddListener(ProceedToNextFloor);
         }
-        
-        CreateLoadingOverlay();
-    }
 
-    // Helper to reduce code duplication
-    private RectTransform FindOrCreateLoopBox(string boxName, Vector2 anchorMin, Vector2 anchorMax, bool isLeftAlign = false)
-    {
-        Transform box = canvas.transform.Find(boxName);
-        if (box == null)
-        {
-            foreach (Transform t in canvas.GetComponentsInChildren<Transform>(true))
-            {
-                if (t.name == boxName)
-                {
-                    box = t;
-                    break;
-                }
-            }
-        }
-
-        if (box != null)
-        {
-            RectTransform rt = box.GetComponent<RectTransform>();
-            EnsureLayoutGroup(rt, isLeftAlign);
-            return rt;
-        }
-        else
-        {
-            return CreateBox(boxName, anchorMin, anchorMax, isLeftAlign);
-        }
+        UpdateFloorText();
     }
 
     private void EnsureLayoutGroup(RectTransform rt, bool isLeftAlign)
@@ -468,98 +510,10 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         if (layout.childForceExpandWidth) layout.childForceExpandWidth = false;
     }
 
-    private RectTransform CreateBox(string boxName, Vector2 anchorMin, Vector2 anchorMax, bool isLeftAlign)
-    {
-        if (canvas == null) return null;
-        GameObject boxObj = new GameObject(boxName, typeof(RectTransform));
-        boxObj.transform.SetParent(canvas.transform, false);
-        RectTransform rt = boxObj.GetComponent<RectTransform>();
-        
-        rt.anchorMin = anchorMin;
-        rt.anchorMax = anchorMax;
-        rt.pivot = isLeftAlign ? new Vector2(0, 1) : new Vector2(1, 1);
-        rt.sizeDelta = Vector2.zero;
-
-        HorizontalLayoutGroup layout = boxObj.AddComponent<HorizontalLayoutGroup>();
-        layout.childAlignment = isLeftAlign ? TextAnchor.MiddleLeft : TextAnchor.MiddleRight;
-        layout.childControlWidth = false;
-        layout.childControlHeight = false;
-        layout.childForceExpandWidth = false;
-        layout.childForceExpandHeight = false;
-        layout.spacing = 20;
-
-        return rt;
-    }
-
-    [SerializeField] private RectTransform topBarPanel;
-    [SerializeField] private RectTransform bottomBarPanel;
-
-    private void CreateLetterbox()
-    {
-        if (canvas == null) return;
-
-        // Top Bar
-        if (topBarPanel == null)
-        {
-            // Try to find existing first
-            Transform existing = canvas.transform.Find("TopBar");
-            if (existing != null)
-            {
-                topBarPanel = existing.GetComponent<RectTransform>();
-            }
-            else
-            {
-                // Create new
-                GameObject topObj = new GameObject("TopBar");
-                topObj.transform.SetParent(canvas.transform, false);
-                Image topImage = topObj.AddComponent<Image>();
-                topImage.color = Color.black;
-                topImage.raycastTarget = false;
-
-                topBarPanel = topObj.GetComponent<RectTransform>();
-                topBarPanel.anchorMin = new Vector2(0, 1);
-                topBarPanel.anchorMax = new Vector2(1, 1);
-                topBarPanel.pivot = new Vector2(0.5f, 1);
-                topBarPanel.sizeDelta = new Vector2(0, 120); // Height 120
-                topBarPanel.anchoredPosition = Vector2.zero;
-                
-                // Only push to back if we created it (assume manual placement is correct otherwise)
-                topObj.transform.SetSiblingIndex(0);
-            }
-        }
-
-        // Bottom Bar
-        if (bottomBarPanel == null)
-        {
-            // Try to find existing first
-            Transform existing = canvas.transform.Find("BottomBar");
-            if (existing != null)
-            {
-                bottomBarPanel = existing.GetComponent<RectTransform>();
-            }
-            else
-            {
-                GameObject bottomObj = new GameObject("BottomBar");
-                bottomObj.transform.SetParent(canvas.transform, false);
-                Image bottomImage = bottomObj.AddComponent<Image>();
-                bottomImage.color = Color.black;
-                bottomImage.raycastTarget = false;
-
-                bottomBarPanel = bottomObj.GetComponent<RectTransform>();
-                bottomBarPanel.anchorMin = new Vector2(0, 0);
-                bottomBarPanel.anchorMax = new Vector2(1, 0);
-                bottomBarPanel.pivot = new Vector2(0.5f, 0);
-                bottomBarPanel.sizeDelta = new Vector2(0, 120); // Height 120
-                bottomBarPanel.anchoredPosition = Vector2.zero;
-
-                // Only push to back if we created it
-                bottomObj.transform.SetSiblingIndex(0);
-            }
-        }
-    }
-
     // Deprecated CreateUIBoxItem replaced by generic helper, keeping method signature if needed or removing internal call
     // Removed specific CreateUIBoxItem to use helper logic inside InitializeUI
+
+
 
     private void UpdateInventoryUI()
     {
@@ -678,182 +632,6 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         }
     }
 
-
-    private void CreateCanvas()
-    {
-        GameObject canvasObj = new GameObject("UICanvas");
-        // Parent under GameUIManager so Canvas persists with DontDestroyOnLoad
-        canvasObj.transform.SetParent(transform, false);
-        
-        canvas = canvasObj.AddComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 32767;
-        
-        CanvasScaler scaler = canvasObj.AddComponent<CanvasScaler>();
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1920, 1080);
-        
-        canvasObj.AddComponent<GraphicRaycaster>();
-        
-        Debug.Log("[GameUIManager] Created persistent UICanvas as child of GameUIManager.");
-    }
-
-    private void CreateMessageText()
-    {
-        if (canvas == null) return;
-
-        GameObject textObj = new GameObject("MessageText");
-        textObj.transform.SetParent(canvas.transform, false);
-        
-        messageText = textObj.AddComponent<Text>();
-        messageText.font = customFont != null ? customFont : Font.CreateDynamicFontFromOSFont("Arial", 48);
-        messageText.fontSize = 48;
-        messageText.alignment = TextAnchor.LowerCenter;
-        messageText.color = Color.white;
-        
-        Outline outline = textObj.AddComponent<Outline>();
-        outline.effectColor = Color.black;
-        outline.effectDistance = new Vector2(2, -2);
-
-        RectTransform rectTransform = messageText.rectTransform;
-        rectTransform.anchorMin = new Vector2(0.1f, 0.05f);
-        rectTransform.anchorMax = new Vector2(0.9f, 0.2f);
-        rectTransform.pivot = new Vector2(0.5f, 0);
-        rectTransform.anchoredPosition = Vector2.zero;
-        rectTransform.sizeDelta = Vector2.zero;
-        
-        messageText.raycastTarget = false; // Disable blocking clicks
-        messageText.text = "";
-    }
-    
-
-
-    private void CreateFloorText()
-    {
-        if (canvas == null) return;
-
-        GameObject textObj = new GameObject("FloorText");
-        textObj.transform.SetParent(canvas.transform, false);
-        
-        floorText = textObj.AddComponent<Text>();
-        floorText.font = customFont != null ? customFont : Font.CreateDynamicFontFromOSFont("Arial", 48);
-        floorText.fontSize = 48;
-        floorText.alignment = TextAnchor.UpperRight;
-        floorText.color = Color.white;
-        floorText.horizontalOverflow = HorizontalWrapMode.Overflow;
-        
-        Outline outline = textObj.AddComponent<Outline>();
-        outline.effectColor = Color.black;
-        outline.effectDistance = new Vector2(2, -2);
-
-        RectTransform rectTransform = floorText.rectTransform;
-        // Top Right
-        rectTransform.anchorMin = new Vector2(1, 1);
-        rectTransform.anchorMax = new Vector2(1, 1);
-        rectTransform.pivot = new Vector2(1, 1);
-        rectTransform.anchoredPosition = new Vector2(-20, -20); // Padding
-        rectTransform.sizeDelta = new Vector2(1000, 100); // Expanded width for Score text
-        
-        UpdateFloorText();
-    }
-
-    // [Removed duplicate UpdateFloorText]
-
-    private void GenerateResultScreenInEditor()
-    {
-        if (canvas == null) canvas = FindObjectOfType<Canvas>();
-        if (canvas == null) CreateCanvas();
-        CreateResultScreen();
-        // Ensure the reference is saved in Editor
-        #if UNITY_EDITOR
-        UnityEditor.EditorUtility.SetDirty(this);
-        #endif
-    }
-
-    private void CreateResultScreen()
-    {
-        if (canvas == null) return;
-
-        // Check if already exists to avoid duplicates when clicking multiple times
-        Transform existing = canvas.transform.Find("ResultScreen");
-        if (existing != null)
-        {
-            resultScreenPanel = existing.gameObject;
-            return;
-        }
-
-        // Panel
-        resultScreenPanel = new GameObject("ResultScreen", typeof(RectTransform));
-        resultScreenPanel.transform.SetParent(canvas.transform, false);
-        Image panelImage = resultScreenPanel.AddComponent<Image>();
-        panelImage.color = new Color(0, 0, 0, 0.8f); // Dark semi-transparent
-        
-        RectTransform rt = resultScreenPanel.GetComponent<RectTransform>();
-        rt.anchorMin = Vector2.zero;
-        rt.anchorMax = Vector2.one;
-        rt.sizeDelta = Vector2.zero;
-        
-        // Hide by default
-        resultScreenPanel.SetActive(false);
-
-        // Button
-        GameObject btnObj = new GameObject("NextButton", typeof(RectTransform));
-        btnObj.transform.SetParent(resultScreenPanel.transform, false);
-        Image btnImage = btnObj.AddComponent<Image>();
-        btnImage.color = Color.white;
-        
-        nextFloorButton = btnObj.AddComponent<Button>();
-        // Note: In Editor mode, AddListener doesn't persist consistently for runtime events if not serialized, 
-        // but CreateResultScreen is also called at runtime. 
-        // For Editor-generated objects, it's better if the user assigns the OnClick event or we do it at runtime start.
-        // We will keep the runtime hook in InitializeUI or Awake if possible, but here we add it for runtime generation.
-        nextFloorButton.onClick.AddListener(ProceedToNextFloor);
-        
-        RectTransform btnRT = btnObj.GetComponent<RectTransform>();
-        btnRT.anchorMin = new Vector2(0.5f, 0.5f);
-        btnRT.anchorMax = new Vector2(0.5f, 0.5f);
-        btnRT.sizeDelta = new Vector2(1500, 500); // 5x size
-        btnRT.anchoredPosition = Vector2.zero;
-
-        // Button Text
-        GameObject textObj = new GameObject("Text", typeof(RectTransform));
-        textObj.transform.SetParent(btnObj.transform, false);
-        Text btnText = textObj.AddComponent<Text>();
-        btnText.text = "NEXT FLOOR";
-        btnText.font = customFont != null ? customFont : Font.CreateDynamicFontFromOSFont("Arial", 160); // 5x size
-        
-        // Force Point filtering for sharp edges (pixel perfect)
-        if (btnText.font != null && btnText.font.material != null && btnText.font.material.mainTexture != null)
-        {
-            btnText.font.material.mainTexture.filterMode = FilterMode.Point;
-        }
-
-        btnText.fontSize = 160; // 5x size
-        btnText.color = Color.black; // Text color
-        btnText.alignment = TextAnchor.MiddleCenter;
-
-        // Add Outline for "crisp" look (White text with black outline is typical, but here text is black. 
-        // If user wants outline, maybe they want white text? keeping black for now as per previous code, 
-        // but Adding Outline component often helps visibility if valid.)
-        // Actually, if text is black, Outline should be white? Or maybe no outline? 
-        // The user complained about "blurry outline". If there WAS NO outline, they wouldn't say "outline is blurry".
-        // They might mean the character edges. 
-        // But for "Next Floor", let's add a white outline to make it "pop" if it's black text? 
-        // Or keep it simple. Let's add the code to force FilterMode.Point, that's the main "crispness" fix.
-        // And add an Outline component just in case they want that style, with large distance.
-        
-        Outline ol = textObj.AddComponent<Outline>();
-        ol.effectColor = Color.white;
-        ol.effectDistance = new Vector2(4, -4); // Moderate outline
-        
-        RectTransform textRT = textObj.GetComponent<RectTransform>();
-        textRT.anchorMin = Vector2.zero;
-        textRT.anchorMax = Vector2.one;
-        textRT.sizeDelta = Vector2.zero;
-
-        resultScreenPanel.SetActive(false);
-    }
-
     public void ShowResultScreen()
     {
         if (resultScreenPanel == null) InitializeUI();
@@ -866,6 +644,64 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         {
             pm.SetInputEnabled(false);
         }
+
+        // Bonus for Stage Clear (Moved here so it's counted in animation)
+        AddScore(300);
+
+        // Start Score Animation
+        StartCoroutine(AnimateScoreTally());
+    }
+
+    private System.Collections.IEnumerator AnimateScoreTally()
+    {
+        // Initial setup
+        int startStage = StageScore;
+        int startTotal = TotalScore; // This is the total BEFORE this stage (since AddScore doesn't update it anymore)
+        int targetTotal = startTotal + startStage; // Target total
+        
+        int currentStageScore = startStage;
+        int currentTotalScore = startTotal;
+        
+        // Set initial text
+        if (resultStageScoreText != null) resultStageScoreText.text = $"Stage Score: {currentStageScore}";
+        if (resultTotalScoreText != null) resultTotalScoreText.text = $"Total Score: {currentTotalScore}";
+        
+        // Disable Next Button while animating? (Optional, skipping for now to allow fast click)
+        if (nextFloorButton != null) nextFloorButton.interactable = false;
+
+        yield return new WaitForSeconds(0.5f); // Small delay before start
+
+        float duration = 2.0f; // Animation duration
+        float elapsed = 0f;
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / duration;
+            // Ease out
+            t = Mathf.Sin(t * Mathf.PI * 0.5f);
+
+            int movedScore = Mathf.RoundToInt(Mathf.Lerp(0, startStage, t));
+            
+            currentStageScore = startStage - movedScore;
+            currentTotalScore = startTotal + movedScore;
+
+            if (resultStageScoreText != null) resultStageScoreText.text = $"Stage Score: {currentStageScore}";
+            if (resultTotalScoreText != null) resultTotalScoreText.text = $"Total Score: {currentTotalScore}";
+            
+            yield return null;
+        }
+
+        // Ensure final values
+        if (resultStageScoreText != null) resultStageScoreText.text = $"Stage Score: 0";
+        if (resultTotalScoreText != null) resultTotalScoreText.text = $"Total Score: {targetTotal}";
+
+        // Commit logic: Update actual Total Score
+        TotalScore = targetTotal;
+        // StageScore remains as is until reset in LoadNextFloorRoutine, or we can visually set it to 0?
+        // Let's leave StageScore variable alone (it will be reset on load), but visual is 0.
+
+        if (nextFloorButton != null) nextFloorButton.interactable = true;
     }
 
     [SerializeField] private float sceneLoadDelay = 1.0f; // Editable in Inspector
@@ -1189,6 +1025,17 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         }
 
 
+    }
+
+    private Transform RecursiveFind(Transform parent, string name)
+    {
+        if (parent.name == name) return parent;
+        foreach (Transform child in parent)
+        {
+            Transform result = RecursiveFind(child, name);
+            if (result != null) return result;
+        }
+        return null;
     }
 }
 
