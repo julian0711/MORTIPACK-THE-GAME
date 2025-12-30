@@ -7,7 +7,7 @@
       "dependencies": {
         "com.unity.nuget.newtonsoft-json": "3.0.2"
       },
-      "hash": "6e0ef2347a910fee81bae18ca8e93a0c4f37ef1a"
+      "hash": "eea02d1a0d6eef6fe96f511deeaf12e683c5df7d"
     },
     "com.gamelovers.mcp-unity": {
       "version": "https://github.com/CoderGamester/mcp-unity.git",

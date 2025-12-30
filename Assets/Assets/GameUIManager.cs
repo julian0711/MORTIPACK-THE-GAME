@@ -33,6 +33,32 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
     [SerializeField] private Text floorText;
     [SerializeField] private GameObject resultScreenPanel;
     [SerializeField] private Button nextFloorButton;
+    private Image loadingOverlay;
+
+    private void CreateLoadingOverlay()
+    {
+        if (canvas == null) return;
+        Transform existing = canvas.transform.Find("LoadingOverlay");
+        if (existing != null)
+        {
+            loadingOverlay = existing.GetComponent<Image>();
+        }
+        else
+        {
+            GameObject overlayObj = new GameObject("LoadingOverlay");
+            overlayObj.transform.SetParent(canvas.transform, false);
+            loadingOverlay = overlayObj.AddComponent<Image>();
+            loadingOverlay.color = Color.black;
+            loadingOverlay.raycastTarget = true; // Block input
+            
+            RectTransform rt = loadingOverlay.rectTransform;
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.sizeDelta = Vector2.zero;
+        }
+        // Initially active to hide scene load artifacts
+        if (loadingOverlay != null) loadingOverlay.gameObject.SetActive(true);
+    }
 
     public int CurrentFloor { get; private set; } = 1;
     
@@ -42,15 +68,19 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
 
     private void Awake()
     {
+        Debug.Log($"[GameUIManager] Awake() called. _instance is null: {_instance == null}, this: {gameObject.name}");
+        
         if (_instance == null)
         {
             _instance = this;
             transform.SetParent(null);
             DontDestroyOnLoad(gameObject);
             SceneManager.sceneLoaded += OnSceneLoaded;
+            Debug.Log("[GameUIManager] Initialized as singleton and set to DontDestroyOnLoad.");
         }
         else if (_instance != this)
         {
+            Debug.Log("[GameUIManager] Duplicate instance detected, destroying this one.");
             Destroy(gameObject);
             return;
         }
@@ -89,7 +119,15 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         // Bonus for Stage Clear
         AddScore(300);
         
-        // Wait for the specified delay
+        // Show Loading Overlay (Fake fade out)
+        if (loadingOverlay != null)
+        {
+             loadingOverlay.gameObject.SetActive(true);
+             loadingOverlay.canvasRenderer.SetAlpha(1.0f);
+        }
+
+        // Wait for the specified delay - allow player to see score update briefly if needed, 
+        // OR start fading immediately. For now, just wait.
         yield return new WaitForSeconds(sceneLoadDelay);
 
         CurrentFloor++;
@@ -98,7 +136,39 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         
         if (InventoryManager.Instance != null) InventoryManager.Instance.RemoveItem("key");
         
+        // Hide ResultScreen before scene transition to prevent it from persisting
+        if (resultScreenPanel != null) resultScreenPanel.SetActive(false);
+        
+        // Re-enable player input for the new scene
+        PlayerMovement pm = FindObjectOfType<PlayerMovement>();
+        if (pm != null) pm.SetInputEnabled(true);
+        
         SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+    }
+
+    private IEnumerator FadeInRoutine()
+    {
+        if (loadingOverlay == null) yield break;
+        
+        loadingOverlay.gameObject.SetActive(true);
+        loadingOverlay.canvasRenderer.SetAlpha(1.0f);
+        
+        // Wait for generation
+        yield return null; 
+        yield return null;
+
+        float duration = 0.5f;
+        float elapsed = 0f;
+        
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float alpha = 1.0f - Mathf.Clamp01(elapsed / duration);
+            if (loadingOverlay != null) loadingOverlay.canvasRenderer.SetAlpha(alpha);
+            yield return null;
+        }
+        
+        if (loadingOverlay != null) loadingOverlay.gameObject.SetActive(false);
     }
 
     [SerializeField] private RectTransform uiBoxItem;
@@ -108,7 +178,9 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
 
     private void Start()
     {
+        Debug.Log("[GameUIManager] Start() called. Initializing UI...");
         InitializeUI();
+        Debug.Log($"[GameUIManager] After InitializeUI - canvas: {(canvas != null ? canvas.name : "NULL")}, floorText: {(floorText != null ? "OK" : "NULL")}");
     }
 
     private void Update()
@@ -137,19 +209,125 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
 
     private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
+        Debug.Log($"[GameUIManager] OnSceneLoaded: {scene.name}");
+        
+        // Reset connection flag to ensure event is re-subscribed if needed
+        // (InventoryManager is also DontDestroyOnLoad, so the event might be stale)
+        if (InventoryManager.Instance != null && !isInventoryConnected)
+        {
+            InventoryManager.Instance.OnInventoryChanged += UpdateInventoryUI;
+            isInventoryConnected = true;
+            Debug.Log("[GameUIManager] Re-connected to InventoryManager OnSceneLoaded.");
+        }
+        
         InitializeUI();
+        
+        // Ensure all UI elements are active
+        EnsureUIActive();
+        
         UpdateInventoryUI(); // Force refresh to prevent empty inventory flicker
+        
+        // Match transition timing with LoadingOverlay
+        StartCoroutine(FadeInRoutine());
+    }
+    
+    private void EnsureUIActive()
+    {
+        // Canvas check and recovery
+        if (canvas == null)
+        {
+            InitializeUI(); // Re-run initialization to find canvas
+        }
+
+        // Ensure Canvas is active
+        if (canvas != null && !canvas.gameObject.activeInHierarchy)
+        {
+            canvas.gameObject.SetActive(true);
+            Debug.Log("[GameUIManager] Reactivated Canvas.");
+        }
+        
+        // Ensure FloorText is active
+        if (floorText != null && !floorText.gameObject.activeInHierarchy)
+        {
+            floorText.gameObject.SetActive(true);
+            Debug.Log("[GameUIManager] Reactivated FloorText.");
+        }
+        
+        // Ensure UI Boxes are active
+        if (uiBoxItem != null && !uiBoxItem.gameObject.activeInHierarchy)
+        {
+            uiBoxItem.gameObject.SetActive(true);
+            Debug.Log("[GameUIManager] Reactivated uiBoxItem.");
+        }
+        
+        if (uiBoxKey != null && !uiBoxKey.gameObject.activeInHierarchy)
+        {
+            uiBoxKey.gameObject.SetActive(true);
+            Debug.Log("[GameUIManager] Reactivated uiBoxKey.");
+        }
+        
+        // Ensure MessageText is active
+        if (messageText != null && !messageText.gameObject.activeInHierarchy)
+        {
+            messageText.gameObject.SetActive(true);
+        }
+        
+        // Ensure ResultScreen is hidden (should not persist across scene loads)
+        if (resultScreenPanel != null && resultScreenPanel.activeInHierarchy)
+        {
+            resultScreenPanel.SetActive(false);
+            Debug.Log("[GameUIManager] Hid ResultScreen on scene load.");
+        }
     }
 
     private void InitializeUI()
     {
-        if (canvas == null)
+        Debug.Log("[GameUIManager] InitializeUI() started.");
+
+        // 1. Try to find existing assigned canvas
+        if (canvas != null)
         {
-            canvas = FindObjectOfType<Canvas>();
+             // Already assigned, just ensure it's active
+             canvas.gameObject.SetActive(true);
+             Debug.Log($"[GameUIManager] Using assigned Canvas: {canvas.name}");
+        }
+        else
+        {
+            // 2. Search for MobileUI (Canvas) first as it is the main UI canvas
+            GameObject mobileUI = GameObject.Find("MobileUI");
+            if (mobileUI != null)
+            {
+                canvas = mobileUI.GetComponent<Canvas>();
+                if (canvas != null)
+                {
+                    Debug.Log("[GameUIManager] Found MobileUI Canvas.");
+                }
+            }
+
+            // 3. If not found, search for ANY Canvas
             if (canvas == null)
             {
+                canvas = FindObjectOfType<Canvas>();
+                if (canvas != null)
+                {
+                     Debug.Log($"[GameUIManager] Found a Canvas: {canvas.name}");
+                }
+            }
+
+            // 4. If still not found, create new one
+            if (canvas == null)
+            {
+                Debug.Log("[GameUIManager] No Canvas found, creating new one.");
                 CreateCanvas();
             }
+        }
+        
+        // Ensure Canvas is persistent if it's not MobileUI (MobileUI is handled by MobileController)
+        // Adjust sorting order to be on top
+        if (canvas != null)
+        {
+            // Force high sorting order to be visible
+            canvas.sortingOrder = 32767;
         }
 
         // Ensure EventSystem exists for UI interaction
@@ -203,6 +381,12 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
             }
         }
         
+        // Clear initial text to prevent "Material obtained" message on start
+        if (messageText != null)
+        {
+            messageText.text = "";
+        }
+        
 
 
         if (floorText == null)
@@ -232,6 +416,9 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
             {
                 CreateResultScreen();
             }
+            
+            // ResultScreen should be hidden at start of level
+            if (resultScreenPanel != null) resultScreenPanel.SetActive(false);
         }
 
         // Ensure button functionality regardless of how it was created/assigned
@@ -240,6 +427,8 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
             nextFloorButton.onClick.RemoveAllListeners();
             nextFloorButton.onClick.AddListener(ProceedToNextFloor);
         }
+        
+        CreateLoadingOverlay();
     }
 
     // Helper to reduce code duplication
@@ -493,6 +682,9 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
     private void CreateCanvas()
     {
         GameObject canvasObj = new GameObject("UICanvas");
+        // Parent under GameUIManager so Canvas persists with DontDestroyOnLoad
+        canvasObj.transform.SetParent(transform, false);
+        
         canvas = canvasObj.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
         canvas.sortingOrder = 32767;
@@ -502,6 +694,8 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         scaler.referenceResolution = new Vector2(1920, 1080);
         
         canvasObj.AddComponent<GraphicRaycaster>();
+        
+        Debug.Log("[GameUIManager] Created persistent UICanvas as child of GameUIManager.");
     }
 
     private void CreateMessageText()
@@ -598,6 +792,9 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         rt.anchorMin = Vector2.zero;
         rt.anchorMax = Vector2.one;
         rt.sizeDelta = Vector2.zero;
+        
+        // Hide by default
+        resultScreenPanel.SetActive(false);
 
         // Button
         GameObject btnObj = new GameObject("NextButton", typeof(RectTransform));
@@ -941,6 +1138,10 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
                 DungeonGeneratorV2 dGenRadar = FindObjectOfType<DungeonGeneratorV2>();
                 if (dGenRadar != null)
                 {
+                    if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.radarSE != null)
+                    {
+                        GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.radarSE);
+                    }
                     dGenRadar.ActivateRadar(10); // 10 Turns
                     string msg = ItemDatabase.Instance.GetItemUsageMessage(key);
                     if (string.IsNullOrEmpty(msg)) msg = "エネミーの気配が可視化された！（10ターン）";

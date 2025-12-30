@@ -8,6 +8,7 @@ public class MobileInputController : MonoBehaviour
     [SerializeField] private Button leftButton;
     [SerializeField] private Button rightButton;
     [SerializeField] private Button interactButton; // Added Interact Button
+    [SerializeField] private Button menuButton; // Added Menu Button
     
     private Vector2 movementDirection = Vector2.zero;
     private bool isInteractPressed = false;
@@ -38,6 +39,28 @@ public class MobileInputController : MonoBehaviour
                 StartCoroutine(FlashButton(interactButton.GetComponent<Image>()));
             });
         }
+
+        SetupMenuButton(menuButton);
+    }
+
+    private void SetupMenuButton(Button btn)
+    {
+        if (btn != null)
+        {
+            btn.onClick.RemoveAllListeners();
+            btn.onClick.AddListener(() => {
+                OptionMenu option = Object.FindFirstObjectByType<OptionMenu>();
+                if (option != null)
+                {
+                    option.ToggleMenu();
+                    StartCoroutine(FlashButton(btn.GetComponent<Image>()));
+                }
+                else
+                {
+                    Debug.LogWarning("[MobileInput] OptionMenu not found in scene!");
+                }
+            });
+        }
     }
     
     private void SetupMovementButton(Button btn, Vector2 dir)
@@ -53,6 +76,8 @@ public class MobileInputController : MonoBehaviour
     }
     
     // UI生成ロジック (ContextMenuから実行)
+    // UI生成ロジック (ContextMenuから実行)
+    // Refactored to be non-destructive: Finds existing elements first.
     [ContextMenu("Generate Complete UI")]
     public void GenerateCompleteUI()
     {
@@ -87,7 +112,8 @@ public class MobileInputController : MonoBehaviour
         }
 
         // 3. D-Pad (左下)
-        if (dpadRect == null)
+        Transform dpadTransform = canvas.transform.Find("D-Pad");
+        if (dpadTransform == null)
         {
             GameObject dpadObj = new GameObject("D-Pad");
             dpadObj.transform.SetParent(canvas.transform, false);
@@ -96,66 +122,71 @@ public class MobileInputController : MonoBehaviour
             dpadRect.anchorMax = Vector2.zero;
             dpadRect.pivot = Vector2.zero;
             dpadRect.anchoredPosition = dpadPosition;
-            
+            dpadTransform = dpadObj.transform;
+
 #if UNITY_EDITOR
             UnityEditor.Undo.RegisterCreatedObjectUndo(dpadObj, "Create D-Pad");
 #endif
-            
-            float size = 100f;
-            float space = 10f;
-            
-            upButton = CreateButton("Up", dpadObj.transform, new Vector2(size + space, (size + space) * 2), size);
-            downButton = CreateButton("Down", dpadObj.transform, new Vector2(size + space, 0), size);
-            leftButton = CreateButton("Left", dpadObj.transform, new Vector2(0, size + space), size);
-            rightButton = CreateButton("Right", dpadObj.transform, new Vector2((size + space) * 2, size + space), size);
-            
-            dpadRect.sizeDelta = new Vector2((size + space) * 3, (size + space) * 3);
+            dpadRect.sizeDelta = new Vector2(330, 330); // 100*3 + 10*3 approx
+        }
+        else
+        {
+             dpadRect = dpadTransform.GetComponent<RectTransform>();
         }
 
-        // 4. Action Buttons (右下)
-        GameObject actionsObj = new GameObject("ActionButtons");
-        actionsObj.transform.SetParent(canvas.transform, false);
-        RectTransform actionsRect = actionsObj.AddComponent<RectTransform>();
-        actionsRect.anchorMin = new Vector2(1, 0); // 右下
-        actionsRect.anchorMax = new Vector2(1, 0);
-        actionsRect.pivot = new Vector2(1, 0);
-        actionsRect.anchoredPosition = new Vector2(-100, 100);
-        actionsRect.sizeDelta = new Vector2(300, 300);
-#if UNITY_EDITOR
-        UnityEditor.Undo.RegisterCreatedObjectUndo(actionsObj, "Create Actions");
-#endif
+        float size = 100f;
+        float space = 10f;
 
-        // Sprite自動設定 (Editor only)
+        upButton = CreateOrGetButton("Up", dpadTransform, new Vector2(size + space, (size + space) * 2), size);
+        downButton = CreateOrGetButton("Down", dpadTransform, new Vector2(size + space, 0), size);
+        leftButton = CreateOrGetButton("Left", dpadTransform, new Vector2(0, size + space), size);
+        rightButton = CreateOrGetButton("Right", dpadTransform, new Vector2((size + space) * 2, size + space), size);
+
+
+        // 4. Action Buttons (右下)
+        Transform actionsTransform = canvas.transform.Find("ActionButtons");
+        RectTransform actionsRect;
+        if (actionsTransform == null)
+        {
+            GameObject actionsObj = new GameObject("ActionButtons");
+            actionsObj.transform.SetParent(canvas.transform, false);
+            actionsRect = actionsObj.AddComponent<RectTransform>();
+            actionsRect.anchorMin = new Vector2(1, 0); // 右下
+            actionsRect.anchorMax = new Vector2(1, 0);
+            actionsRect.pivot = new Vector2(1, 0);
+            actionsRect.anchoredPosition = new Vector2(-100, 100);
+            actionsRect.sizeDelta = new Vector2(300, 300);
+            actionsTransform = actionsObj.transform;
+#if UNITY_EDITOR
+            UnityEditor.Undo.RegisterCreatedObjectUndo(actionsObj, "Create Actions");
+#endif
+        }
+        else
+        {
+            actionsRect = actionsTransform.GetComponent<RectTransform>();
+        }
+
+        // Sprite自動設定 (Editor only) - Only if not set
 #if UNITY_EDITOR
         if (buttonSprite == null)
         {
             string spritePath = "Assets/Sprites/button_control.png";
-            // マルチスプライト対応: 全アセットを読み込んでSprite型を探す
             Object[] allAssets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath(spritePath);
             foreach (var asset in allAssets)
             {
                 if (asset is Sprite sp)
                 {
                     buttonSprite = sp;
-                    break; // 最初に見つけたスプライトを使用
+                    break; 
                 }
             }
-            
-            if (buttonSprite != null)
+            if (buttonSprite == null)
             {
-                 UnityEditor.Undo.RecordObject(this, "Auto-assign Button Sprite");
-                 Debug.Log($"[MobileInput] Auto-assigned sprite: {buttonSprite.name}");
-            }
-            else
-            {
-                 // パスで見つからない場合、名前で検索 (t:Spriteで検索すればサブアセットもヒットする)
+                 // Fallback search
                  string[] guids = UnityEditor.AssetDatabase.FindAssets("button_control t:Sprite");
                  if (guids.Length > 0)
                  {
                      string path = UnityEditor.AssetDatabase.GUIDToAssetPath(guids[0]);
-                     // もしテクスチャパスが返ってきたら再度サブアセット検索が必要だが、
-                     // FindAssets t:Sprite は通常メインアセットを返してくることがあるので注意。
-                     // ここではシンプルにそのパスから再度Spriteを探す
                      allAssets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath(path);
                      foreach (var asset in allAssets)
                      {
@@ -165,25 +196,33 @@ public class MobileInputController : MonoBehaviour
                             break;
                         }
                      }
-                     
-                     if (buttonSprite != null)
-                     {
-                         UnityEditor.Undo.RecordObject(this, "Auto-assign Button Sprite");
-                         Debug.Log($"[MobileInput] Found and assigned sprite from search: {buttonSprite.name}");
-                     }
                  }
+            }
+            if (buttonSprite != null)
+            {
+                 UnityEditor.Undo.RecordObject(this, "Auto-assign Button Sprite");
+                 Debug.Log($"[MobileInput] Auto-assigned sprite: {buttonSprite.name}");
             }
         }
 #endif
 
-        interactButton = CreateButton("Search", actionsObj.transform, new Vector2(-150, 0), 120f);
-        CreateButton("Menu", actionsObj.transform, new Vector2(0, 150), 100f);
+        interactButton = CreateOrGetButton("Search", actionsTransform, new Vector2(-150, 0), 120f);
+        menuButton = CreateOrGetButton("Option", actionsTransform, new Vector2(0, 150), 100f);
+        SetupMenuButton(menuButton);
         
-        Debug.Log("Mobile UI Generated Successfully!");
+        Debug.Log("Mobile UI Updated (Existing elements preserved, new ones added)!");
     }
 
-    private Button CreateButton(string name, Transform parent, Vector2 pos, float size)
+    private Button CreateOrGetButton(string name, Transform parent, Vector2 pos, float size)
     {
+        // Try find existing first
+        Transform existing = parent.Find(name);
+        if (existing != null)
+        {
+            return existing.GetComponent<Button>();
+        }
+
+        // Create new if not found
         GameObject btnObj = new GameObject(name);
         btnObj.transform.SetParent(parent, false);
         

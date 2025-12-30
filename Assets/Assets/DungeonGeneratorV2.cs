@@ -88,10 +88,14 @@ public class DungeonGeneratorV2 : MonoBehaviour
         }
     }
     
+    private void Awake()
+    {
+        // Moved to Awake to ensure map is generated before first render (fixes fog delay)
+        GenerateDungeon();
+    }
+
     private void Start()
     {
-        GenerateDungeon();
-        
         TurnManager tm = FindObjectOfType<TurnManager>();
         if (tm != null)
         {
@@ -634,6 +638,9 @@ public class DungeonGeneratorV2 : MonoBehaviour
             }
             
             Debug.Log($"Player spawned at tile: ({center.x}, {center.y}) position: {spawnPos}");
+            
+            // Ensure the starting area is revealed immediately
+            RevealMap(spawnPos);
         }
     }
     

@@ -51,14 +51,26 @@ public class MobileGameCamera : MonoBehaviour
         }
     }
 
+    private Vector3 currentOffset = Vector3.zero;
+    private Vector3 targetOffset = Vector3.zero;
+
+    public void SetCameraOffset(Vector3 offset)
+    {
+        targetOffset = offset;
+    }
+
     void LateUpdate()
     {
         // プレイヤーを常に追従
         if (playerTransform != null)
         {
             Vector3 playerPos = playerTransform.position;
-            // 即座に追従（Z軸は-10固定）
-            transform.position = new Vector3(playerPos.x, playerPos.y, -10f);
+            
+            // Offset Adjustment (Smooth)
+            currentOffset = Vector3.Lerp(currentOffset, targetOffset, Time.deltaTime * 5f);
+
+            // 即座に追従（Z軸は-10固定）+ Offset
+            transform.position = new Vector3(playerPos.x, playerPos.y, -10f) + currentOffset;
         }
         else
         {
