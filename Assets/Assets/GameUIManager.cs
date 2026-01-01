@@ -32,6 +32,7 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
     [SerializeField] private GameObject resultScreenPanel;
     [SerializeField] private Text resultTotalScoreText;
     [SerializeField] private Text resultStageScoreText;
+    [SerializeField] private GameObject inventoryScreenPanel; // New Inventory Screen
     [SerializeField] private Button nextFloorButton;
     [SerializeField] private RectTransform uiBoxItem;
     [SerializeField] private RectTransform uiBoxKey;
@@ -459,11 +460,11 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
                 if (t != null) uiBoxKey = t.GetComponent<RectTransform>();
             }
             
-            // 5. ResultScreen (Player/OptionRoot/ResultScreen or MobileUI?)
-            // If ResultScreen is in Player/OptionRoot, we need to find Player first, OR we assume it's in Canvas.
+            // 5. ResultScreen (Player/UI_Root/ResultScreen or MobileUI?)
+            // If ResultScreen is in Player/UI_Root, we need to find Player first, OR we assume it's in Canvas.
             // Since we reverted, original code looked in Canvas.
-            // If user has not created ResultScreen in MobileUI, this might fail unless it's in OptionRoot.
-            // For now, let's look in Canvas, and if not found, look in Player/OptionRoot just in case.
+            // If user has not created ResultScreen in MobileUI, this might fail unless it's in UI_Root.
+            // For now, let's look in Canvas, and if not found, look in Player/UI_Root just in case.
             
             if (resultScreenPanel == null)
             {
@@ -484,6 +485,21 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
                     if (btn != null) nextFloorButton = btn.GetComponent<Button>();
                     
                     resultScreenPanel.SetActive(false);
+                }
+            }
+            
+            // 6. InventoryScreen
+            if (inventoryScreenPanel == null)
+            {
+                Transform t = RecursiveFind(canvas.transform, "InventoryScreen");
+                if (t != null)
+                {
+                    inventoryScreenPanel = t.gameObject;
+                    inventoryScreenPanel.SetActive(false); // Ensure hidden by default
+                    
+                    // Optional: Find Close Button inside if needed in future
+                    // Transform closeBtn = RecursiveFind(t, "CloseButton");
+                    // if (closeBtn != null) ...
                 }
             }
         }
@@ -555,80 +571,128 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
 
             if (targetParent == null) continue;
 
-            // Create Item Slot
-            GameObject slot = new GameObject($"ItemSlot_{key}");
-            slot.transform.SetParent(targetParent, false);
+            // Delegate to shared method (ALLOW USE = true)
+            CreateItemSlot(targetParent, key, count, true);
+        }
+    }
+
+    public void ToggleInventoryScreen()
+    {
+        if (inventoryScreenPanel == null) InitializeUI();
+        
+        if (inventoryScreenPanel != null)
+        {
+            bool isActive = !inventoryScreenPanel.activeSelf;
+            inventoryScreenPanel.SetActive(isActive);
             
-            RectTransform slotRT = slot.AddComponent<RectTransform>();
-            slotRT.sizeDelta = new Vector2(80, 80); // Fixed slot size
+            if (isActive)
+            {
+                Time.timeScale = 0f; // Pause Game
+                RefreshInventoryScreen(); // Show items in the big screen
+                Debug.Log("[GameUIManager] Inventory Screen Opened.");
+            }
+            else
+            {
+                Time.timeScale = 1f; // Resume Game
+                Debug.Log("[GameUIManager] Inventory Screen Closed.");
+            }
+        }
+    }
+    
+    // Logic to populate the big Inventory Screen (separate from bottom bar)
+    // REMOVED: User uses main UI item box for inventory display now.
+    private void RefreshInventoryScreen()
+    {
+        // Logic removed as requested. 
+        // The main UI (ui_item_box) is used for inventory display.
+    }
 
-            // Add transparent Image for Raycast target
-            Image slotImage = slot.AddComponent<Image>();
-            slotImage.color = Color.clear;
-            slotImage.raycastTarget = true; // Explicitly enable
+    /// <summary>
+    /// Creates a standardized Item Slot using consistent style (Size 80x80).
+    /// Used by both Main UI and Inventory Screen.
+    /// </summary>
+    private void CreateItemSlot(Transform parent, string key, int count, bool allowUse)
+    {
+        // 1. Slot (Container & Interaction)
+        GameObject slot = new GameObject($"ItemSlot_{key}");
+        slot.transform.SetParent(parent, false);
+        
+        RectTransform slotRT = slot.AddComponent<RectTransform>();
+        slotRT.sizeDelta = new Vector2(80, 80); // UNIFIED SIZE
 
-            // Add ItemSlotHandler for interaction (Click & LongPress)
-            ItemSlotHandler handler = slot.AddComponent<ItemSlotHandler>();
-            
-            handler.OnClick = () => {
-                ItemDatabase itemMgr = ItemDatabase.Instance;
-                if (itemMgr == null) itemMgr = FindObjectOfType<ItemDatabase>();
+        // Add transparent Image for Raycast target
+        Image slotImage = slot.AddComponent<Image>();
+        slotImage.color = Color.clear;
+        slotImage.raycastTarget = true;
 
-                if (itemMgr != null)
+        // Add ItemSlotHandler for interaction
+        ItemSlotHandler handler = slot.AddComponent<ItemSlotHandler>();
+        
+        handler.OnClick = () => {
+            ItemDatabase itemMgr = ItemDatabase.Instance;
+            if (itemMgr == null) itemMgr = FindObjectOfType<ItemDatabase>();
+
+            if (itemMgr != null)
+            {
+                string desc = itemMgr.GetItemDescription(key);
+                ShowMessage(desc ?? $"{key}", key);
+            }
+        };
+        
+        if (allowUse)
+        {
+            handler.OnLongPress = () => {
+                // If Inventory Screen is active, DO NOT use item (View Only mode for all slots)
+                if (inventoryScreenPanel != null && inventoryScreenPanel.activeSelf)
                 {
-                    string desc = itemMgr.GetItemDescription(key);
-                    if (!string.IsNullOrEmpty(desc))
-                    {
-                        ShowMessage(desc, key);
-                    }
-                    else
-                    {
-                        ShowMessage($"{key} (No description)", key);
-                    }
+                    return;
+                }
+
+                UseItem(key); 
+                
+                // If we are in Inventory Screen mode, we might want to refresh it.
+                // Using a simple check: if the parent is our inventory container.
+                if (inventoryScreenPanel != null && inventoryScreenPanel.activeSelf)
+                {
+                    // Simple delayed refresh or immediate if safe
+                    RefreshInventoryScreen();
                 }
             };
-            
-            // OnLongPress: Use Item
-            handler.OnLongPress = () => {
-                UseItem(key);
-            };
+        }
 
-            // Image
-            GameObject iconObj = new GameObject("Icon");
-            iconObj.transform.SetParent(slot.transform, false);
-            Image icon = iconObj.AddComponent<Image>();
-            icon.sprite = LoadItemSprite(key);
-            icon.preserveAspect = true;
-            RectTransform iconRT = icon.GetComponent<RectTransform>();
-            iconRT.anchorMin = Vector2.zero;
-            iconRT.anchorMax = Vector2.one;
-            iconRT.sizeDelta = Vector2.zero;
-            
-            // Allow click to pass through image if needed, but Button is on parent
-            icon.raycastTarget = false; 
+        // 2. Icon
+        GameObject iconObj = new GameObject("Icon");
+        iconObj.transform.SetParent(slot.transform, false);
+        Image icon = iconObj.AddComponent<Image>();
+        icon.sprite = LoadItemSprite(key);
+        icon.preserveAspect = true;
+        RectTransform iconRT = icon.GetComponent<RectTransform>();
+        iconRT.anchorMin = Vector2.zero;
+        iconRT.anchorMax = Vector2.one;
+        iconRT.sizeDelta = Vector2.zero;
+        icon.raycastTarget = false; 
 
-            // Count Text (if > 1)
-            if (count > 1)
-            {
-                GameObject textObj = new GameObject("CountText");
-                textObj.transform.SetParent(slot.transform, false);
-                Text countText = textObj.AddComponent<Text>();
-                countText.text = $"x{count}";
-                countText.font = customFont != null ? customFont : Font.CreateDynamicFontFromOSFont("Arial", 24);
-                countText.fontSize = 24;
-                countText.alignment = TextAnchor.LowerRight;
-                countText.color = Color.white;
-                countText.raycastTarget = false;
-                
-                Outline ol = textObj.AddComponent<Outline>();
-                ol.effectColor = Color.black;
-                
-                RectTransform textRT = countText.rectTransform;
-                textRT.anchorMin = new Vector2(0.5f, 0);
-                textRT.anchorMax = Vector2.one;
-                textRT.offsetMin = Vector2.zero;
-                textRT.offsetMax = new Vector2(-5, 5); // Padding
-            }
+        // 3. Count Text
+        if (count > 1)
+        {
+            GameObject textObj = new GameObject("CountText");
+            textObj.transform.SetParent(slot.transform, false);
+            Text countText = textObj.AddComponent<Text>();
+            countText.text = $"x{count}";
+            countText.font = customFont != null ? customFont : Font.CreateDynamicFontFromOSFont("Arial", 24);
+            countText.fontSize = 24;
+            countText.alignment = TextAnchor.LowerRight;
+            countText.color = Color.white;
+            countText.raycastTarget = false;
+            
+            Outline ol = textObj.AddComponent<Outline>();
+            ol.effectColor = Color.black;
+            
+            RectTransform textRT = countText.rectTransform;
+            textRT.anchorMin = new Vector2(0.5f, 0);
+            textRT.anchorMax = Vector2.one;
+            textRT.offsetMin = Vector2.zero;
+            textRT.offsetMax = new Vector2(-5, 5); 
         }
     }
 
@@ -921,6 +985,8 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
                             GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.warpSE);
                         }
                         StartCoroutine(player.WarpSequence(bestPos));
+                        // Fix: Consume item
+                        if (InventoryManager.Instance != null) InventoryManager.Instance.RemoveItem(key);
                         string msg = ItemDatabase.Instance.GetItemUsageMessage(key);
                         if (string.IsNullOrEmpty(msg)) msg = "ワープした！";
                         ShowMessage(msg, key);

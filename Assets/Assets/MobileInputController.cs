@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.Serialization;
 
 public class MobileInputController : MonoBehaviour
 {
@@ -8,7 +9,9 @@ public class MobileInputController : MonoBehaviour
     [SerializeField] private Button leftButton;
     [SerializeField] private Button rightButton;
     [SerializeField] private Button interactButton; // Added Interact Button
-    [SerializeField] private Button menuButton; // Added Menu Button
+    [FormerlySerializedAs("menuButton")]
+    [SerializeField] private Button inventoryButton; // Renamed from menuButton
+    [SerializeField] private Button closeInventoryButton; // Added Close Inventory Button
     
     private Vector2 movementDirection = Vector2.zero;
     private bool isInteractPressed = false;
@@ -40,24 +43,25 @@ public class MobileInputController : MonoBehaviour
             });
         }
 
-        SetupMenuButton(menuButton);
+        SetupInventoryButton(inventoryButton);
+        SetupInventoryButton(closeInventoryButton); // Reuse simple toggle logic for close button too
     }
 
-    private void SetupMenuButton(Button btn)
+    private void SetupInventoryButton(Button btn)
     {
         if (btn != null)
         {
             btn.onClick.RemoveAllListeners();
             btn.onClick.AddListener(() => {
-                OptionMenu option = Object.FindFirstObjectByType<OptionMenu>();
-                if (option != null)
+                // Directly toggle inventory via GameUIManager
+                if (GameUIManager.Instance != null)
                 {
-                    option.ToggleMenu();
+                    GameUIManager.Instance.ToggleInventoryScreen();
                     StartCoroutine(FlashButton(btn.GetComponent<Image>()));
                 }
                 else
                 {
-                    Debug.LogWarning("[MobileInput] OptionMenu not found in scene!");
+                    Debug.LogWarning("[MobileInput] GameUIManager not found!");
                 }
             });
         }
@@ -207,8 +211,20 @@ public class MobileInputController : MonoBehaviour
 #endif
 
         interactButton = CreateOrGetButton("Search", actionsTransform, new Vector2(-150, 0), 120f);
-        menuButton = CreateOrGetButton("Option", actionsTransform, new Vector2(0, 150), 100f);
-        SetupMenuButton(menuButton);
+        interactButton = CreateOrGetButton("Search", actionsTransform, new Vector2(-150, 0), 120f);
+        
+        // Handling Legacy "Option" button if exists
+        Transform oldOption = actionsTransform.Find("Option");
+        if (oldOption != null)
+        {
+             oldOption.name = "Inventory";
+             Text t = oldOption.GetComponentInChildren<Text>();
+             if (t != null && t.text == "Option") t.text = "Inventory";
+             Debug.Log("[MobileInput] Renamed legacy 'Option' button to 'Inventory'");
+        }
+
+        inventoryButton = CreateOrGetButton("Inventory", actionsTransform, new Vector2(0, 150), 100f);
+        SetupInventoryButton(inventoryButton);
         
         Debug.Log("Mobile UI Updated (Existing elements preserved, new ones added)!");
     }
