@@ -253,7 +253,7 @@ public class DungeonGeneratorV2 : MonoBehaviour
         }
     }
     
-    public void RevealMap(Vector3 position)
+    public void RevealMap(Vector3 position, bool addScore = true)
     {
         if (!useFogOfWar || fogGrid == null) return;
         
@@ -271,7 +271,7 @@ public class DungeonGeneratorV2 : MonoBehaviour
                     {
                         Destroy(fogGrid[x, y]);
                         fogGrid[x, y] = null;
-                        if (GameUIManager.Instance != null) GameUIManager.Instance.AddScore(10);
+                        if (addScore && GameUIManager.Instance != null) GameUIManager.Instance.AddScore(10);
                     }
                 }
             }
@@ -640,7 +640,7 @@ public class DungeonGeneratorV2 : MonoBehaviour
             Debug.Log($"Player spawned at tile: ({center.x}, {center.y}) position: {spawnPos}");
             
             // Ensure the starting area is revealed immediately
-            RevealMap(spawnPos);
+            RevealMap(spawnPos, false);
         }
     }
     

@@ -33,6 +33,7 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
     [SerializeField] private Text resultTotalScoreText;
     [SerializeField] private Text resultStageScoreText;
     [SerializeField] private GameObject inventoryScreenPanel; // New Inventory Screen
+    [SerializeField] private Text inventoryTotalScoreText; // Added for Total Score in Inventory
     [SerializeField] private Button nextFloorButton;
     [SerializeField] private RectTransform uiBoxItem;
     [SerializeField] private RectTransform uiBoxKey;
@@ -174,8 +175,34 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
 
     // ... (Transition Logic) ...
 
+    private Coroutine pulseCoroutine;
+    private Vector3 initialTextScale = Vector3.one; // Default fallback
+
     public void ProceedToNextFloor()
     {
+        Debug.Log($"[GameUIManager] ProceedToNextFloor Clicked. Flag: {isTransitioningToNextFloor}, Button: {(nextFloorButton != null ? nextFloorButton.interactable : "NULL")}");
+        
+        // 1. Double check flag
+        if (isTransitioningToNextFloor) 
+        {
+            Debug.Log("[GameUIManager] Blocked ProceedToNextFloor because isTransitioningToNextFloor is TRUE.");
+            return;
+        }
+
+        // LOCK IMMEDIATELY to prevent double clicks during delay
+        isTransitioningToNextFloor = true;
+        
+        // 2. Disable button immediately
+        if (nextFloorButton != null) nextFloorButton.interactable = false;
+
+        // 3. Stop Pulse & Reset
+        if (pulseCoroutine != null) StopCoroutine(pulseCoroutine);
+        if (nextFloorButton != null)
+        {
+             Transform textObj = nextFloorButton.transform.Find("Text");
+             if (textObj != null) textObj.localScale = initialTextScale; 
+        }
+
         StartCoroutine(LoadNextFloorRoutine());
     }
 
@@ -203,7 +230,9 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         
         // Hide ResultScreen before scene transition? NO, keep it to cover the map!
         // if (resultScreenPanel != null) resultScreenPanel.SetActive(false);
-        isTransitioningToNextFloor = true; 
+        // Hide ResultScreen before scene transition? NO, keep it to cover the map!
+        // if (resultScreenPanel != null) resultScreenPanel.SetActive(false);
+        // isTransitioningToNextFloor = true; // Moved to ProceedToNextFloor for immediate lock 
         
         // Re-enable player input for the new scene
         PlayerMovement pm = FindObjectOfType<PlayerMovement>();
@@ -219,9 +248,9 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         loadingOverlay.gameObject.SetActive(true);
         loadingOverlay.canvasRenderer.SetAlpha(1.0f);
         
-        // Wait for generation
-        yield return null; 
-        yield return null;
+        // Wait for generation (Black Screen Duration extended)
+        // User requested to keep it black longer to hide map generation/fog glitches
+        yield return new WaitForSeconds(1.5f);
 
         float duration = 0.5f;
         float elapsed = 0f;
@@ -235,6 +264,7 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         }
         
         if (loadingOverlay != null) loadingOverlay.gameObject.SetActive(false);
+        isTransitioningToNextFloor = false; // Fix: Reset transition flag
     }
 
     private IEnumerator FadeOutResultScreen()
@@ -336,19 +366,13 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         // Match transition timing with LoadingOverlay
         if (isTransitioningToNextFloor)
         {
-            // Use ResultScreen as cover
-             if (resultScreenPanel != null)
-             {
-                 resultScreenPanel.SetActive(true);
-                 // Disable interaction again just in case (e.g. NextButton)
-                 if (nextFloorButton != null) nextFloorButton.interactable = true; // Reset button
-                 StartCoroutine(FadeOutResultScreen());
-             }
-             else
-             {
-                 // Fallback to overlay if result screen missing
-                 StartCoroutine(FadeInRoutine());
-             }
+            // Use ResultScreen as cover? NO, User requested instant black screen instead of fade out.
+            // We disable ResultScreen logic for transition cover.
+            if (resultScreenPanel != null)
+            {
+                resultScreenPanel.SetActive(false); // Ensure hidden
+            }
+            StartCoroutine(FadeInRoutine());
         }
         else
         {
@@ -511,7 +535,14 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         if (nextFloorButton != null)
         {
             nextFloorButton.onClick.RemoveAllListeners();
+            nextFloorButton.onClick.RemoveAllListeners();
             nextFloorButton.onClick.AddListener(ProceedToNextFloor);
+            nextFloorButton.onClick.AddListener(ProceedToNextFloor);
+            nextFloorButton.interactable = true; // Insurance: Ensure enabled by default
+            Debug.Log("[GameUIManager] InitializeUI: NextFloorButton found and listener added.");
+            
+            Transform textObj = nextFloorButton.transform.Find("Text");
+            if (textObj != null) initialTextScale = textObj.localScale;
         }
 
         UpdateFloorText();
@@ -603,8 +634,11 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
     // REMOVED: User uses main UI item box for inventory display now.
     private void RefreshInventoryScreen()
     {
-        // Logic removed as requested. 
-        // The main UI (ui_item_box) is used for inventory display.
+        // Update Total Score Text if assigned
+        if (inventoryTotalScoreText != null)
+        {
+            inventoryTotalScoreText.text = $"Total Score: {TotalScore}";
+        }
     }
 
     /// <summary>
@@ -698,6 +732,9 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
 
     public void ShowResultScreen()
     {
+        Debug.Log("[GameUIManager] ShowResultScreen called. Forcing isTransitioningToNextFloor = false.");
+        isTransitioningToNextFloor = false; // ★ FORCE RESET
+        
         if (resultScreenPanel == null) InitializeUI();
         
         resultScreenPanel.SetActive(true);
@@ -730,8 +767,13 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         if (resultStageScoreText != null) resultStageScoreText.text = $"Stage Score: {currentStageScore}";
         if (resultTotalScoreText != null) resultTotalScoreText.text = $"Total Score: {currentTotalScore}";
         
-        // Disable Next Button while animating? (Optional, skipping for now to allow fast click)
-        if (nextFloorButton != null) nextFloorButton.interactable = false;
+        // Disable Next Button while animating
+        if (nextFloorButton != null) 
+        {
+            nextFloorButton.interactable = false;
+            Transform textObj = nextFloorButton.transform.Find("Text");
+            if (textObj != null) textObj.gameObject.SetActive(false); // Hide text during calculation
+        }
 
         yield return new WaitForSeconds(0.5f); // Small delay before start
 
@@ -765,7 +807,33 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         // StageScore remains as is until reset in LoadNextFloorRoutine, or we can visually set it to 0?
         // Let's leave StageScore variable alone (it will be reset on load), but visual is 0.
 
-        if (nextFloorButton != null) nextFloorButton.interactable = true;
+        if (nextFloorButton != null) 
+        {
+            nextFloorButton.interactable = true;
+            Transform textObj = nextFloorButton.transform.Find("Text");
+            if (textObj != null) textObj.gameObject.SetActive(true); // Show text
+            
+            // Start Pulse Animation
+            if (pulseCoroutine != null) StopCoroutine(pulseCoroutine);
+            pulseCoroutine = StartCoroutine(PulseButtonText());
+        }
+    }
+
+    private System.Collections.IEnumerator PulseButtonText()
+    {
+        if (nextFloorButton == null) yield break;
+        Transform textObj = nextFloorButton.transform.Find("Text");
+        if (textObj == null) yield break;
+
+        Vector3 originalScale = initialTextScale; 
+        
+        while (true)
+        {
+            // Pulse between 0.985 and 1.015 (Amplitude 0.015)
+            float scale = 1.0f + Mathf.Sin(Time.time * 5.0f) * 0.015f;
+            textObj.localScale = originalScale * scale;
+            yield return null;
+        }
     }
 
     [SerializeField] private float sceneLoadDelay = 1.0f; // Editable in Inspector
@@ -1056,6 +1124,10 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
                 DungeonGeneratorV2 dGenTalisman = FindObjectOfType<DungeonGeneratorV2>();
                 if (dGenTalisman != null)
                 {
+                    if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.talismanSE != null)
+                    {
+                        GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.talismanSE);
+                    }
                     int banished = dGenTalisman.BanishEnemies();
                     if (banished > 0)
                     {
@@ -1077,6 +1149,10 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
                 
                 if (pmBlue != null && dGenBlue != null)
                 {
+                    if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.blueboxSE != null)
+                    {
+                        GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.blueboxSE);
+                    }
                     dGenBlue.SpawnShopDoorAt(pmBlue.transform.position);
                     string msg = ItemDatabase.Instance.GetItemUsageMessage(key);
                     if (string.IsNullOrEmpty(msg)) msg = "謎の扉が現れた…";

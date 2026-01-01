@@ -25,6 +25,8 @@ public class GlobalSoundManager : MonoBehaviour
     public AudioClip radioSE;
     public AudioClip radarSE;
     public AudioClip migawariSE;
+    public AudioClip talismanSE; // New
+    public AudioClip blueboxSE;  // New
 
     private void Awake()
     {
@@ -93,6 +95,8 @@ public class GlobalSoundManager : MonoBehaviour
         if (radioSE == null) radioSE = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/AssetsAudioBGM/radioSE.mp3");
         if (radarSE == null) radarSE = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/AssetsAudioBGM/radarSE.mp3");
         if (migawariSE == null) migawariSE = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/AssetsAudioBGM/migawariSE.mp3");
+        if (talismanSE == null) talismanSE = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/AssetsAudioBGM/talismanSE.mp3");
+        if (blueboxSE == null) blueboxSE = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/AssetsAudioBGM/blueboxSE.mp3");
         
         // BGM
         if (defaultBGM == null) defaultBGM = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/AssetsAudioBGM/stageBGM01.mp3");

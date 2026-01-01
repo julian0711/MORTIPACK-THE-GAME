@@ -12,6 +12,9 @@ public class InventoryManager : MonoBehaviour
     // Event when inventory changes
     public event Action OnInventoryChanged;
 
+    [Header("Debug")]
+    [SerializeField] private bool debugStartWithKey = false;
+
     private void Awake()
     {
         if (Instance == null)
@@ -22,6 +25,15 @@ public class InventoryManager : MonoBehaviour
         else
         {
             Destroy(gameObject);
+        }
+    }
+
+    private void Start()
+    {
+        if (debugStartWithKey)
+        {
+            AddItem("key");
+            Debug.Log("[InventoryManager] Debug: Added initial key.");
         }
     }
 
