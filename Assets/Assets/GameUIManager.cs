@@ -50,6 +50,9 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
     // Score Variables
     public int TotalScore { get; private set; } = 0;
     public int StageScore { get; private set; } = 0;
+    
+    // Point Variable (New)
+    public int TotalPoint { get; private set; } = 0;
 
     private void Awake()
     {
@@ -181,6 +184,13 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
     public void ProceedToNextFloor()
     {
         Debug.Log($"[GameUIManager] ProceedToNextFloor Clicked. Flag: {isTransitioningToNextFloor}, Button: {(nextFloorButton != null ? nextFloorButton.interactable : "NULL")}");
+
+        // Play SE
+        // Play SE
+        if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.nextFloorSE != null)
+        {
+            GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.nextFloorSE);
+        }
         
         // 1. Double check flag
         if (isTransitioningToNextFloor) 
@@ -430,6 +440,9 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         }
     }
 
+    [SerializeField] private Text resultTotalPointText; // New Point Text for Result
+    [SerializeField] private Text inventoryTotalPointText; // New Point Text for Inventory
+
     private void InitializeUI()
     {
         Debug.Log("[GameUIManager] InitializeUI() started.");
@@ -490,6 +503,7 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
             // If user has not created ResultScreen in MobileUI, this might fail unless it's in UI_Root.
             // For now, let's look in Canvas, and if not found, look in Player/UI_Root just in case.
             
+            // 5. ResultScreen (Player/UI_Root/ResultScreen or MobileUI?)
             if (resultScreenPanel == null)
             {
                 Transform t = RecursiveFind(canvas.transform, "ResultScreen");
@@ -503,13 +517,36 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
                 if (t != null)
                 {
                     resultScreenPanel = t.gameObject;
-                    
-                    // Re-bind Button
-                    Transform btn = RecursiveFind(t, "NextButton");
-                    if (btn != null) nextFloorButton = btn.GetComponent<Button>();
-                    
                     resultScreenPanel.SetActive(false);
                 }
+            }
+            
+            // Re-bind Result Screen Components if panel exists
+            if (resultScreenPanel != null)
+            {
+                 Transform t = resultScreenPanel.transform;
+                 
+                 // Re-bind Button if missing
+                 if (nextFloorButton == null)
+                 {
+                     Transform btn = RecursiveFind(t, "NextButton");
+                     if (btn != null) nextFloorButton = btn.GetComponent<Button>();
+                 }
+
+                 // New Point Binding (Fix: Check independently)
+                 if (resultTotalPointText == null)
+                 {
+                     Transform pointTxt = RecursiveFind(t, "total point");
+                     if (pointTxt != null) 
+                     {
+                         resultTotalPointText = pointTxt.GetComponent<Text>();
+                         Debug.Log("[GameUIManager] Bound 'total point' text.");
+                     }
+                     else
+                     {
+                         Debug.LogWarning("[GameUIManager] 'total point' text NOT found in ResultScreen.");
+                     }
+                 }
             }
             
             // 6. InventoryScreen
@@ -520,11 +557,32 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
                 {
                     inventoryScreenPanel = t.gameObject;
                     inventoryScreenPanel.SetActive(false); // Ensure hidden by default
-                    
-                    // Optional: Find Close Button inside if needed in future
-                    // Transform closeBtn = RecursiveFind(t, "CloseButton");
-                    // if (closeBtn != null) ...
                 }
+            }
+            
+            // Re-bind Inventory Screen Components if panel exists
+            if (inventoryScreenPanel != null)
+            {
+                Transform t = inventoryScreenPanel.transform;
+                
+                // New Point Binding for Inventory (Fix: Check independently)
+                if (inventoryTotalPointText == null)
+                {
+                    Transform pointInvTxt = RecursiveFind(t, "total point_Inventory");
+                    if (pointInvTxt != null) 
+                    {
+                        inventoryTotalPointText = pointInvTxt.GetComponent<Text>();
+                        Debug.Log("[GameUIManager] Bound 'total point_Inventory' text.");
+                    }
+                    else
+                    {
+                        Debug.LogWarning("[GameUIManager] 'total point_Inventory' text NOT found in InventoryScreen.");
+                    }
+                }
+                
+                // Optional: Find Close Button inside if needed in future
+                // Transform closeBtn = RecursiveFind(t, "CloseButton");
+                // if (closeBtn != null) ...
             }
         }
         else
@@ -544,6 +602,10 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
             Transform textObj = nextFloorButton.transform.Find("Text");
             if (textObj != null) initialTextScale = textObj.localScale;
         }
+
+        // Initial Text Set for Points (0 case)
+        if (resultTotalPointText != null) resultTotalPointText.text = $"Point: {TotalPoint}";
+        if (inventoryTotalPointText != null) inventoryTotalPointText.text = $"Point: {TotalPoint}";
 
         UpdateFloorText();
     }
@@ -638,6 +700,12 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         if (inventoryTotalScoreText != null)
         {
             inventoryTotalScoreText.text = $"Total Score: {TotalScore}";
+        }
+
+        // Update Total Point Text check
+        if (inventoryTotalPointText != null)
+        {
+            inventoryTotalPointText.text = $"Point: {TotalPoint}";
         }
     }
 
@@ -748,6 +816,11 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
 
         // Bonus for Stage Clear (Moved here so it's counted in animation)
         AddScore(300);
+        
+        // Add Points relative to Stage Score
+        // Note: StageScore is already final here (including bonus)
+        TotalPoint += StageScore;
+        Debug.Log($"[GameUIManager] Points Added: {StageScore}. Total Points: {TotalPoint}");
 
         // Start Score Animation
         StartCoroutine(AnimateScoreTally());
@@ -760,12 +833,17 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         int startTotal = TotalScore; // This is the total BEFORE this stage (since AddScore doesn't update it anymore)
         int targetTotal = startTotal + startStage; // Target total
         
+        int startPoint = TotalPoint - StageScore; // Calculate start point (Current Total - Added Score)
+        int targetPoint = TotalPoint; // Target is current Total
+
         int currentStageScore = startStage;
         int currentTotalScore = startTotal;
+        int currentPoint = startPoint;
         
         // Set initial text
         if (resultStageScoreText != null) resultStageScoreText.text = $"Stage Score: {currentStageScore}";
         if (resultTotalScoreText != null) resultTotalScoreText.text = $"Total Score: {currentTotalScore}";
+        if (resultTotalPointText != null) resultTotalPointText.text = $"Point: {currentPoint}"; // Start from old value
         
         // Disable Next Button while animating
         if (nextFloorButton != null) 
@@ -791,16 +869,19 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
             
             currentStageScore = startStage - movedScore;
             currentTotalScore = startTotal + movedScore;
+            currentPoint = startPoint + movedScore; // Animate Point same way (Note: Point addition = Stage Score)
 
             if (resultStageScoreText != null) resultStageScoreText.text = $"Stage Score: {currentStageScore}";
             if (resultTotalScoreText != null) resultTotalScoreText.text = $"Total Score: {currentTotalScore}";
+            if (resultTotalPointText != null) resultTotalPointText.text = $"Point: {currentPoint}";
             
             yield return null;
         }
 
         // Ensure final values
-        if (resultStageScoreText != null) resultStageScoreText.text = $"Stage Score: 0";
+        if (resultStageScoreText != null) resultStageScoreText.text = "Stage Score: 0";
         if (resultTotalScoreText != null) resultTotalScoreText.text = $"Total Score: {targetTotal}";
+        if (resultTotalPointText != null) resultTotalPointText.text = $"Point: {targetPoint}";
 
         // Commit logic: Update actual Total Score
         TotalScore = targetTotal;

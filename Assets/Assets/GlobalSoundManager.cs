@@ -27,6 +27,7 @@ public class GlobalSoundManager : MonoBehaviour
     public AudioClip migawariSE;
     public AudioClip talismanSE; // New
     public AudioClip blueboxSE;  // New
+    public AudioClip nextFloorSE; // New for Result Button
 
     private void Awake()
     {
