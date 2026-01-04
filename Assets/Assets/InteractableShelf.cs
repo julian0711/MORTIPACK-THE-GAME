@@ -16,14 +16,16 @@ public class InteractableShelf : MonoBehaviour
         public string key;
         public string name;
         public int weight;
+        public int price; // Shop Price
         public string description;
         public List<string> usageMessages; // Supports multiple messages
         
-        public DropItem(string k, string n, int w, string d = "", params string[] u) 
+        public DropItem(string k, string n, int w, int p, string d = "", params string[] u) 
         { 
             key = k; 
             name = n; 
             weight = w; 
+            price = p;
             description = d; 
             usageMessages = new List<string>(u);
             if (usageMessages.Count == 0) usageMessages.Add(""); // Ensure not null/empty
@@ -184,7 +186,7 @@ public class InteractableShelf : MonoBehaviour
     private System.Collections.IEnumerator ProcessMapAcquisition(string key, Vector3 playerPos, GameUIManager ui)
     {
         // 1. Disable Input
-        PlayerMovement pm = FindObjectOfType<PlayerMovement>();
+        PlayerMovement pm = FindFirstObjectByType<PlayerMovement>();
         if (pm != null) pm.SetInputEnabled(false);
 
         // 2. Show Acquisition Message & Icon (Standard feedback)
@@ -198,7 +200,7 @@ public class InteractableShelf : MonoBehaviour
         yield return new WaitForSeconds(0.5f);
 
         // 4. Trigger Effect (Reveal Random Areas - Standard logic)
-        DungeonGeneratorV2 dungeon = FindObjectOfType<DungeonGeneratorV2>();
+        DungeonGeneratorV2 dungeon = FindFirstObjectByType<DungeonGeneratorV2>();
         if (dungeon != null)
         {
             dungeon.RevealRandomAreas(3);

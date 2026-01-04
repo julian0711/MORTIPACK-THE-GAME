@@ -23,10 +23,30 @@ public class MobileInputController : MonoBehaviour
     [SerializeField] private float spacing = 10f;
     [SerializeField] private Vector2 dpadPosition = new Vector2(100, 100);
     
+    [Header("ボタン発光設定")]
+    [SerializeField] private Color buttonFlashColor = Color.green;
+    [SerializeField] private float flashDuration = 0.1f;
+    
     private RectTransform dpadRect;
 
     private void Start()
     {
+        // 0. Ensure EventSystem exists (Critical for UI interaction)
+        if (Object.FindFirstObjectByType<UnityEngine.EventSystems.EventSystem>() == null)
+        {
+             GameObject eventSystem = new GameObject("EventSystem");
+             eventSystem.AddComponent<UnityEngine.EventSystems.EventSystem>();
+             eventSystem.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
+             Debug.Log("[MobileInputController] Auto-created EventSystem (was missing).");
+        }
+
+        // 1. Dynamic Rebinding: Find UI elements if ANY references are missing
+        if (upButton == null || downButton == null || leftButton == null || rightButton == null || 
+            interactButton == null || inventoryButton == null)
+        {
+            RebindUIElements();
+        }
+
         playerMovement = Object.FindFirstObjectByType<PlayerMovement>();
         
         SetupMovementButton(upButton, Vector2.up);
@@ -36,15 +56,88 @@ public class MobileInputController : MonoBehaviour
         
         if (interactButton != null)
         {
-            interactButton.onClick.RemoveAllListeners();
-            interactButton.onClick.AddListener(() => {
-                isInteractPressed = true;
+            // Use EventTrigger for Hold Detection
+            UnityEngine.EventSystems.EventTrigger trigger = interactButton.gameObject.GetComponent<UnityEngine.EventSystems.EventTrigger>();
+            if (trigger == null) trigger = interactButton.gameObject.AddComponent<UnityEngine.EventSystems.EventTrigger>();
+            
+            trigger.triggers.Clear();
+
+            // Down
+            UnityEngine.EventSystems.EventTrigger.Entry entryDown = new UnityEngine.EventSystems.EventTrigger.Entry();
+            entryDown.eventID = UnityEngine.EventSystems.EventTriggerType.PointerDown;
+            entryDown.callback.AddListener((data) => { 
+                isInteractHeld = true; 
                 StartCoroutine(FlashButton(interactButton.GetComponent<Image>()));
             });
+            trigger.triggers.Add(entryDown);
+
+            // Up
+            UnityEngine.EventSystems.EventTrigger.Entry entryUp = new UnityEngine.EventSystems.EventTrigger.Entry();
+            entryUp.eventID = UnityEngine.EventSystems.EventTriggerType.PointerUp;
+            entryUp.callback.AddListener((data) => { isInteractHeld = false; });
+            trigger.triggers.Add(entryUp);
+            
+            // Also keep visual flash safely? Or remove Button component's control?
+            // Usually Button interferes with EventTrigger if not careful, but PointerDown works.
         }
 
         SetupInventoryButton(inventoryButton);
-        SetupInventoryButton(closeInventoryButton); // Reuse simple toggle logic for close button too
+        SetupInventoryButton(inventoryButton);
+        SetupInventoryButton(closeInventoryButton);
+        
+        // Disable built-in transitions to prevent conflict with FlashButton
+        DisableButtonTransition(upButton);
+        DisableButtonTransition(downButton);
+        DisableButtonTransition(leftButton);
+        DisableButtonTransition(rightButton);
+        DisableButtonTransition(interactButton);
+        DisableButtonTransition(inventoryButton);
+        DisableButtonTransition(closeInventoryButton);
+    }
+    
+    private void DisableButtonTransition(Button btn)
+    {
+        if (btn != null)
+        {
+            btn.transition = Selectable.Transition.None;
+        }
+    }
+
+    private void RebindUIElements()
+    {
+        Debug.Log("[MobileInputController] Rebinding UI elements...");
+        GameObject canvasObj = GameObject.Find("MobileControlsCanvas");
+        if (canvasObj != null)
+        {
+            Transform canvasTr = canvasObj.transform;
+            
+            // D-Pad
+            Transform dpad = canvasTr.Find("D-Pad");
+            if (dpad != null)
+            {
+                if (upButton == null) upButton = dpad.Find("Up")?.GetComponent<Button>();
+                if (downButton == null) downButton = dpad.Find("Down")?.GetComponent<Button>();
+                if (leftButton == null) leftButton = dpad.Find("Left")?.GetComponent<Button>();
+                if (rightButton == null) rightButton = dpad.Find("Right")?.GetComponent<Button>();
+            }
+            
+            // Action Buttons
+            Transform actions = canvasTr.Find("ActionButtons");
+            if (actions != null)
+            {
+                if (interactButton == null) interactButton = actions.Find("Search")?.GetComponent<Button>();
+                if (inventoryButton == null) inventoryButton = actions.Find("Inventory")?.GetComponent<Button>();
+                
+                // Try finding CloseButton if it exists (might be in InventoryPanel inside GameUIManager? Or separate?)
+                // Assuming it's not critical for Search button bug.
+            }
+            
+            Debug.Log($"[MobileInputController] Rebound: Search={interactButton!=null}, Up={upButton!=null}");
+        }
+        else
+        {
+            Debug.LogWarning("[MobileInputController] MobileControlsCanvas not found during rebind!");
+        }
     }
 
     private void SetupInventoryButton(Button btn)
@@ -138,8 +231,8 @@ public class MobileInputController : MonoBehaviour
              dpadRect = dpadTransform.GetComponent<RectTransform>();
         }
 
-        float size = 100f;
-        float space = 10f;
+        float size = buttonSize;
+        float space = spacing;
 
         upButton = CreateOrGetButton("Up", dpadTransform, new Vector2(size + space, (size + space) * 2), size);
         downButton = CreateOrGetButton("Down", dpadTransform, new Vector2(size + space, 0), size);
@@ -304,13 +397,19 @@ public class MobileInputController : MonoBehaviour
         }
         return false;
     }
+
+    private bool isInteractHeld = false;
+    public bool GetInteractHeld()
+    {
+        return isInteractHeld;
+    }
     
     private System.Collections.IEnumerator FlashButton(Image img)
     {
         if (img == null) yield break;
         Color original = img.color;
-        img.color = Color.green;
-        yield return new WaitForSeconds(0.1f);
+        img.color = buttonFlashColor;
+        yield return new WaitForSeconds(flashDuration);
         img.color = original;
     }
 }

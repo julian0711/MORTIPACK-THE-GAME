@@ -43,6 +43,14 @@ public class DungeonGeneratorV2 : MonoBehaviour
     [SerializeField] private Sprite playerIdleSprite2;
     [SerializeField] private Sprite enemyIdleSprite2;
     [SerializeField] private Sprite enemyDanceSprite; // For Radio Stun Effect
+    [SerializeField] private Sprite vendorSprite1;
+    [SerializeField] private Sprite vendorSprite2;
+    [SerializeField] private Sprite shoppanelSprite1;
+    [SerializeField] private Sprite shoppanelSprite2;
+
+    [Header("特殊マス設定")]
+    [Range(0, 10)] public int specialTileCount = 0;
+    public Sprite specialTileSprite; // Added for Inspector assignment
 
     public Vector3 GetRandomWalkablePosition()
     {
@@ -90,13 +98,23 @@ public class DungeonGeneratorV2 : MonoBehaviour
     
     private void Awake()
     {
-        // Moved to Awake to ensure map is generated before first render (fixes fog delay)
-        GenerateDungeon();
+        // Check for Shop Flag from persistent UI
+        if (GameUIManager.Instance != null && GameUIManager.Instance.NextStageIsShop)
+        {
+            Debug.Log("[DungeonGeneratorV2] NextStageIsShop flag detected. Generating Shop.");
+            GameUIManager.Instance.NextStageIsShop = false; // Reset flag
+            EnterShop();
+        }
+        else
+        {
+            // Normal Generation
+            GenerateDungeon();
+        }
     }
 
     private void Start()
     {
-        TurnManager tm = FindObjectOfType<TurnManager>();
+        TurnManager tm = FindFirstObjectByType<TurnManager>();
         if (tm != null)
         {
             tm.OnTurnCompleted += OnTurnCompleted;
@@ -125,9 +143,42 @@ public class DungeonGeneratorV2 : MonoBehaviour
     [SerializeField] private bool useFogOfWar = true;
     private GameObject[,] fogGrid;
 
+    [Header("固定ステージデバッグ (Fixed Stage Debug)")]
+    public bool useFixedStageDebug = false;
+    public GameObject debugFixedStagePrefab;
+    
+    [Header("ショップ設定 (Shop Settings)")]
+    public GameObject shopStagePrefab;
+
+    // Public Properties
+    public bool IsFixedStage => isFixedStage;
+    public Vector3 CurrentFixedSpawnPoint { get; private set; }
+
     private void GenerateDungeon()
     {
+        Debug.Log($"[DungeonGeneratorV2] GenerateDungeon Called. useFixedStageDebug: {useFixedStageDebug}, Prefab: {(debugFixedStagePrefab != null ? debugFixedStagePrefab.name : "null")}");
+
+        // 1. Fixed Stage Debug Check
+        if (useFixedStageDebug && debugFixedStagePrefab != null)
+        {
+            Debug.Log("[DungeonGeneratorV2] Switching to Fixed Stage Mode (Debug).");
+            LoadFixedStage(debugFixedStagePrefab);
+            return;
+        }
+
+        // 1b. Check nextStagePrefab from GameUIManager
+        if (GameUIManager.Instance != null && GameUIManager.Instance.nextStagePrefab != null)
+        {
+             Debug.Log($"[DungeonGeneratorV2] Switching to Fixed Stage Mode (NextStagePrefab: {GameUIManager.Instance.nextStagePrefab.name}).");
+             LoadFixedStage(GameUIManager.Instance.nextStagePrefab);
+             return;
+        }
+
+        // 2. Normal Dungeon Generation
+        isFixedStage = false;
+        
         grid = new int[gridWidth, gridHeight];
+        if (rooms == null) rooms = new List<Room>();
         rooms.Clear();
         
         // グリッド初期化
@@ -216,6 +267,20 @@ public class DungeonGeneratorV2 : MonoBehaviour
         // プレイヤーとエネミー配置
         SpawnPlayer();
         SpawnEnemies();
+        
+        // Special Tiles (Collect walkable positions first)
+        List<Vector2Int> walkablePositions = new List<Vector2Int>();
+        for (int x = 0; x < gridWidth; x++)
+        {
+            for (int y = 0; y < gridHeight; y++)
+            {
+                if (grid[x, y] == 0) // Floor
+                {
+                    walkablePositions.Add(new Vector2Int(x, y));
+                }
+            }
+        }
+        SpawnSpecialTiles(this.transform, walkablePositions);
     }
     
     // ... existing helper methods ...
@@ -720,8 +785,26 @@ public class DungeonGeneratorV2 : MonoBehaviour
         Debug.Log($"Total enemies spawned: {spawned}");
     }
     
+    private bool isFixedStage = false;
+
     public bool IsWorldPositionWalkable(Vector3 worldPosition)
     {
+        if (isFixedStage)
+        {
+            // For Fixed Stages, we rely on Physics2D (Tilemap Colliders)
+            // PlayerMovement checks Physics2D separately, but if it calls this, we should return true 
+            // to defer to the Physics check, OR perform a BoxCast here.
+            
+            // Check for Wall Colliders
+            Collider2D col = Physics2D.OverlapPoint(worldPosition);
+            if (col != null && !col.isTrigger)
+            {
+                // Solid collider found (Wall)
+                return false;
+            }
+            return true;
+        }
+
         int x = Mathf.RoundToInt(worldPosition.x / tileSize);
         int y = Mathf.RoundToInt(worldPosition.y / tileSize);
         return IsTileWalkable(x, y);
@@ -729,6 +812,8 @@ public class DungeonGeneratorV2 : MonoBehaviour
 
     public bool IsTileWalkable(int x, int y)
     {
+        if (isFixedStage) return true; // Fixed stages don't use grid array
+
         if (x < 0 || x >= gridWidth || y < 0 || y >= gridHeight)
         {
             return false;
@@ -740,12 +825,22 @@ public class DungeonGeneratorV2 : MonoBehaviour
     {
         radarTurnsRemaining = turns;
         RevealAllEnemiesOverFog();
+        RevealAllSpecialTiles();
         Debug.Log($"[DungeonGeneratorV2] Radar activated for {turns} turns.");
+    }
+    
+    private void RevealAllSpecialTiles()
+    {
+        SpecialTile[] tiles = FindObjectsByType<SpecialTile>(FindObjectsSortMode.None);
+        foreach (var tile in tiles)
+        {
+            tile.Reveal();
+        }
     }
 
     private void RevealAllEnemiesOverFog()
     {
-        EnemyMovement[] enemies = FindObjectsOfType<EnemyMovement>();
+        EnemyMovement[] enemies = FindObjectsByType<EnemyMovement>(FindObjectsSortMode.None);
         foreach (var enemy in enemies)
         {
             SpriteRenderer sr = enemy.GetComponent<SpriteRenderer>();
@@ -759,7 +854,7 @@ public class DungeonGeneratorV2 : MonoBehaviour
     
     private void ResetEnemiesUnderFog()
     {
-        EnemyMovement[] enemies = FindObjectsOfType<EnemyMovement>();
+        EnemyMovement[] enemies = FindObjectsByType<EnemyMovement>(FindObjectsSortMode.None);
         foreach (var enemy in enemies)
         {
             SpriteRenderer sr = enemy.GetComponent<SpriteRenderer>();
@@ -769,7 +864,19 @@ public class DungeonGeneratorV2 : MonoBehaviour
                 sr.sortingOrder = 20; 
             }
         }
+        
+        ResetAllSpecialTiles();
+        
         Debug.Log("[DungeonGeneratorV2] Radar effect expired. Enemies hidden under fog.");
+    }
+
+    private void ResetAllSpecialTiles()
+    {
+        SpecialTile[] tiles = FindObjectsByType<SpecialTile>(FindObjectsSortMode.None);
+        foreach (var tile in tiles)
+        {
+            tile.Hide(); // Make invisible again
+        }
     }
     public void SpawnShopDoorAt(Vector3 position)
     {
@@ -872,7 +979,7 @@ public class DungeonGeneratorV2 : MonoBehaviour
 
     public int BanishEnemies()
     {
-        EnemyMovement[] enemies = FindObjectsOfType<EnemyMovement>();
+        EnemyMovement[] enemies = FindObjectsByType<EnemyMovement>(FindObjectsSortMode.None);
         if (enemies.Length == 0) return 0;
 
         // Weight Logic: 1->50%, 2->30%, 3->20%
@@ -915,6 +1022,515 @@ public class DungeonGeneratorV2 : MonoBehaviour
         }
     }
 #endif
+    public void LoadFixedStage(GameObject prefab)
+    {
+        Debug.Log("[DungeonGeneratorV2] Loading Fixed Stage...");
+        isFixedStage = true; // Enable Fixed Stage Mode checks
+
+        // 1. Cleanup old children (if any, though usually empty on start)
+        foreach (Transform child in transform)
+        {
+            Destroy(child.gameObject);
+        }
+
+        // 2. Instantiate Prefab
+        GameObject stageObj = Instantiate(prefab, transform);
+        stageObj.name = "FixedStage";
+
+        // 3. Setup Player Position
+        // 3. Setup Player Position
+        FixedMap fixedMap = stageObj.GetComponent<FixedMap>();
+        if (fixedMap == null) fixedMap = stageObj.GetComponentInChildren<FixedMap>();
+
+        Vector3 spawnPos = Vector3.zero;
+        bool foundSpawn = false;
+
+        if (fixedMap != null && fixedMap.playerSpawnPoint != null)
+        {
+            // Debug check: only use if flag is true (default true)
+            if (fixedMap.debugUseThisSpawn)
+            {
+                spawnPos = fixedMap.playerSpawnPoint.position;
+                foundSpawn = true;
+                Debug.Log($"[DungeonGeneratorV2] Using FixedMap SpawnPoint: {spawnPos}");
+            }
+            else
+            {
+                Debug.Log("[DungeonGeneratorV2] FixedMap found but 'debugUseThisSpawn' is false. Searching fallback...");
+            }
+        }
+        
+        if (!foundSpawn)
+        {
+            // Fallback: Search by name
+            Transform fallbackTransform = RecursiveSearch(stageObj.transform, "SpawnPoint");
+            if (fallbackTransform != null)
+            {
+                spawnPos = fallbackTransform.position;
+                foundSpawn = true;
+                Debug.Log("[DungeonGeneratorV2] Found 'SpawnPoint' by name (FixedMap missing or unassigned).");
+            }
+            else
+            {
+                Debug.LogWarning("[DungeonGeneratorV2] Critical: Player Spawn Point NOT found! Defaulting to (0,0).");
+            }
+        }
+        
+        // CORRECTION: Ensure Z is -1 for Player plane (standard for this project)
+        spawnPos.z = -1f;
+
+        // Save for Warpcoin usage
+        CurrentFixedSpawnPoint = spawnPos; 
+        Debug.Log($"[DungeonGeneratorV2] CurrentFixedSpawnPoint set to: {CurrentFixedSpawnPoint}");
+
+        // 4. Move Player
+        if (playerObject == null)
+        {
+            playerObject = GameObject.FindGameObjectWithTag("Player");
+        }
+
+        if (playerObject != null)
+        {
+            Debug.Log($"[DungeonGeneratorV2] Player Found: {playerObject.name}. Moving to {spawnPos}");
+            
+            PlayerMovement playerMovement = playerObject.GetComponent<PlayerMovement>();
+            if (playerMovement != null)
+            {
+                playerMovement.InitializePosition(spawnPos);
+                Debug.Log("[DungeonGeneratorV2] Called InitializePosition on PlayerMovement.");
+            }
+            else
+            {
+                playerObject.transform.position = spawnPos;
+                Debug.Log("[DungeonGeneratorV2] Moved Player Transform directly.");
+            }
+            
+            // Allow Start implementation to sync target if needed
+             // アニメーションコンポーネントの追加/設定 (Copy from SpawnPlayer)
+            if (playerIdleSprite2 != null)
+            {
+                BreathingAnimation anim = playerObject.GetComponent<BreathingAnimation>();
+                if (anim == null) anim = playerObject.AddComponent<BreathingAnimation>();
+                
+                SpriteRenderer sr = playerObject.GetComponent<SpriteRenderer>();
+                if (sr != null)
+                {
+                    sr.sortingOrder = 10; 
+                    anim.Setup(sr.sprite, playerIdleSprite2);
+                }
+            }
+        }
+
+        // 5. Fog Management?
+        // Pour fixed stages, we might want to disable Fog or Reveal All.
+        if (useFogOfWar)
+        {
+            // Disable Fog for fixed stages to avoid black screen.
+            Debug.Log("[DungeonGeneratorV2] Fixed Stage loaded. Fog of War disabled for this stage.");
+        }
+        // 6. Spawn Shop Items (if any spots exist)
+        SpawnShopItems(stageObj.transform);
+        
+        // 7. Spawn Shop Vendor (if any spots exist)
+        SpawnShopVendor(stageObj.transform);
+        
+        // 8. Spawn Special Tiles
+        // Note: GetWalkablePositions(grid) is not applicable here as fixed stages don't use a generated grid.
+        // Assuming SpawnSpecialTiles will find spots or generate based on stageObj.transform.
+        SpawnSpecialTiles(stageObj.transform);
+
+        // 9. Setup Shoppanel Animation
+        SetupShopPanelAnimation(stageObj.transform);
+    }
+    
+    private void SpawnShopItems(Transform stageRoot)
+    {
+        // Find all ShopItemSpots recursively or by name
+        List<Transform> spots = new List<Transform>();
+        foreach (Transform t in stageRoot.GetComponentsInChildren<Transform>())
+        {
+            // Allow "ShopItemSpot", "ShopItemSpot (1)", etc.
+            if (t.name.StartsWith("ShopItemSpot"))
+            {
+                spots.Add(t);
+            }
+        }
+        
+        if (spots.Count == 0) return;
+        
+        Debug.Log($"[DungeonGeneratorV2] Found {spots.Count} ShopItemSpots. Spawning items...");
+        
+        if (itemManager == null) itemManager = ItemDatabase.Instance;
+        if (itemManager == null) return;
+
+        // Valid items list
+        List<InteractableShelf.DropItem> validItems = new List<InteractableShelf.DropItem>();
+        foreach(var item in itemManager.shelfDropTable)
+        {
+            if (item.key != "nothing" && item.key != "key" && item.key != "report" && item.key != "map")
+            {
+                validItems.Add(item);
+            }
+        }
+        
+        if (validItems.Count == 0) return;
+
+        foreach (Transform spot in spots)
+        {
+            // Pick random item
+            var randomItem = validItems[Random.Range(0, validItems.Count)];
+            
+            // Create Item Object
+            GameObject itemObj = new GameObject($"ShopItem_{randomItem.key}");
+            itemObj.transform.position = spot.position;
+            itemObj.transform.SetParent(stageRoot);
+            
+            // Add Sprite
+            SpriteRenderer sr = itemObj.AddComponent<SpriteRenderer>();
+            Sprite itemSprite = Resources.Load<Sprite>($"item/item_{randomItem.key}");
+            if (itemSprite == null) 
+            {
+                Debug.LogWarning($"[DungeonGeneratorV2] Sprite not found for: item/item_{randomItem.key}. Using fallback.");
+                itemSprite = Resources.Load<Sprite>("item/item_doc"); // Fallback
+            }
+            sr.sprite = itemSprite;
+            sr.sortingOrder = 20; // Above floor/spots
+            
+            // Add Collider for Interaction
+            BoxCollider2D col = itemObj.AddComponent<BoxCollider2D>();
+            col.isTrigger = true;
+            col.size = new Vector2(0.8f, 0.8f); // Slightly smaller than tile
+
+            // Add ShopItem Script
+            ShopItem shopItem = itemObj.AddComponent<ShopItem>();
+            shopItem.Setup(randomItem.key, randomItem.price);
+            
+            // Destroy the spot marker visual (optional, or just destroy the whole spot object)
+            Destroy(spot.gameObject);
+        }
+    }
+
+    public void EnterShop()
+    {
+        if (shopStagePrefab != null)
+        {
+            Debug.Log("[DungeonGeneratorV2] Entering Shop...");
+            LoadFixedStage(shopStagePrefab);
+            
+            // Delay message to ensure UI is initialized (waits for Start/Update frame)
+            StartCoroutine(ShowShopWelcomeMessage());
+            
+            // Note: Key grant removed as per request.
+        }
+        else
+        {
+            Debug.LogError("[DungeonGeneratorV2] Shop Stage Prefab is not assigned in Inspector!");
+            if (GameUIManager.Instance != null) GameUIManager.Instance.ShowMessage("ショップデータが見つからない！");
+        }
+    }
+
+    private System.Collections.IEnumerator ShowShopWelcomeMessage()
+    {
+        // Wait for one frame to allow MobileInputController.Start() to create the UI
+        yield return null;
+        
+        if (GameUIManager.Instance != null)
+        {
+            GameUIManager.Instance.ShowMessage("いらっしゃい～！", "vendor");
+        }
+    }
+
+    private Transform RecursiveSearch(Transform parent, string name)
+    {
+        if (parent.name == name) return parent;
+        foreach (Transform child in parent)
+        {
+            Transform result = RecursiveSearch(child, name);
+            if (result != null) return result;
+        }
+        return null;
+    }
+    private void SpawnShopVendor(Transform stageRoot)
+    {
+        // Find VendorSpot
+        Transform vendorSpot = null;
+        foreach (Transform t in stageRoot.GetComponentsInChildren<Transform>())
+        {
+            if (t.name.StartsWith("VendorSpot"))
+            {
+                vendorSpot = t;
+                break;
+            }
+        }
+        
+        if (vendorSpot != null)
+        {
+            Debug.Log("[DungeonGeneratorV2] Found VendorSpot. Spawning Vendor...");
+            GameObject vendorObj = new GameObject("ShopVendor");
+            vendorObj.transform.position = vendorSpot.position;
+            vendorObj.transform.SetParent(stageRoot);
+            
+            // Sprite Renderer
+            SpriteRenderer sr = vendorObj.AddComponent<SpriteRenderer>();
+            sr.sprite = vendorSprite1;
+            sr.sortingOrder = 20;
+            
+            // Animation
+            if (vendorSprite1 != null && vendorSprite2 != null)
+            {
+                BreathingAnimation anim = vendorObj.AddComponent<BreathingAnimation>();
+                anim.Setup(vendorSprite1, vendorSprite2, 0.5f);
+            }
+            else
+            {
+                 Debug.LogWarning("[DungeonGeneratorV2] Vendor Sprites are NOT assigned! Animation will not play.");
+            }
+            
+            // Collider (Trigger)
+            BoxCollider2D col = vendorObj.AddComponent<BoxCollider2D>();
+            col.isTrigger = true;
+            col.size = new Vector2(0.8f, 0.8f);
+            
+            // Script
+            vendorObj.AddComponent<ShopVendor>();
+            
+            // Clean up spot if needed, or leave it
+            // Destroy(vendorSpot.gameObject); 
+        }
+        else
+        {
+            // If no explicit spot, maybe spawn at fixed relative pos?
+            // Or just do nothing and rely on User placing "VendorSpot"
+            Debug.Log("[DungeonGeneratorV2] No VendorSpot found.");
+        }
+    }
+
+    public void RefreshShopItems()
+    {
+        Debug.Log("[DungeonGeneratorV2] Refreshing Shop Items...");
+
+        if (itemManager == null) itemManager = ItemDatabase.Instance;
+        if (itemManager == null) return;
+
+        // Valid items list (Logic shared with SpawnShopItems)
+        List<InteractableShelf.DropItem> validItems = new List<InteractableShelf.DropItem>();
+        foreach(var item in itemManager.shelfDropTable)
+        {
+            if (item.key != "nothing" && item.key != "key" && item.key != "report" && item.key != "map")
+            {
+                validItems.Add(item);
+            }
+        }
+        
+        if (validItems.Count == 0) return;
+
+        // Find all active ShopItem components in the current stage (usually children of stageRoot)
+        // If stageRoot is not easily accessible here (local var in Spawn/Load), we search generally or assume this script is on a manager
+        // that persists? No, DungeonGeneratorV2 persists?
+        // ShopItems are children of the stage instantiated.
+        // We can use FindObjectsByType because in the shop scene these are the only ones unique enough.
+        
+        ShopItem[] currentShopItems = Object.FindObjectsByType<ShopItem>(FindObjectsSortMode.None);
+        
+        foreach (ShopItem shopItem in currentShopItems)
+        {
+            // Pick new random item
+            var randomItem = validItems[Random.Range(0, validItems.Count)];
+            
+            // Update Data
+            shopItem.Setup(randomItem.key, randomItem.price);
+            
+            // Update Visuals
+            // Name
+            shopItem.name = $"ShopItem_{randomItem.key}";
+            
+            // Sprite
+            SpriteRenderer sr = shopItem.GetComponent<SpriteRenderer>();
+            if (sr != null)
+            {
+                Sprite itemSprite = Resources.Load<Sprite>($"item/item_{randomItem.key}");
+                if (itemSprite == null) itemSprite = Resources.Load<Sprite>("item/item_doc");
+                sr.sprite = itemSprite;
+            }
+            
+            // Trigger Animation
+            StartCoroutine(AnimateItemPop(shopItem.transform));
+        }
+    }
+
+    private System.Collections.IEnumerator AnimateItemPop(Transform target)
+    {
+        Vector3 originalScale = Vector3.one; // Assuming default is one
+        // If default is not one, we should probably read it, but these are newly spawned or existing.
+        // Let's assume 1.0f base.
+        
+        float duration = 0.2f;
+        float elapsed = 0f;
+        
+        // Scale Up
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / duration;
+            // Ease Out Back for "Gyun" feel? Or just simple ping pong.
+            float scale = Mathf.Lerp(1.0f, 1.5f, t);
+            target.localScale = new Vector3(scale, scale, 1.0f);
+            yield return null;
+        }
+        
+        // Scale Down
+        elapsed = 0f;
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / duration;
+            float scale = Mathf.Lerp(1.5f, 1.0f, t);
+            target.localScale = new Vector3(scale, scale, 1.0f);
+            yield return null;
+        }
+        
+        target.localScale = originalScale;
+    }
+
+    private void SetupShopPanelAnimation(Transform stageRoot)
+    {
+        if (shoppanelSprite1 == null || shoppanelSprite2 == null) 
+        {
+            Debug.LogWarning("[DungeonGeneratorV2] Shoppanel Sprites are NOT assigned! Animation will not play.");
+            return;
+        }
+
+        int foundCount = 0;
+        foreach (Transform t in stageRoot.GetComponentsInChildren<Transform>(true))
+        {
+            // Match "Shoppanel" case-insensitive
+            if (t.name.IndexOf("Shoppanel", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                Debug.Log($"[DungeonGeneratorV2] Found Shoppanel: {t.name}. Attaching animation.");
+                
+                BreathingAnimation anim = t.GetComponent<BreathingAnimation>();
+                if (anim == null) anim = t.gameObject.AddComponent<BreathingAnimation>();
+                
+                // Force visibility
+                SpriteRenderer sr = t.GetComponent<SpriteRenderer>();
+                if (sr == null) sr = t.gameObject.AddComponent<SpriteRenderer>();
+                sr.sortingOrder = 20;
+
+                anim.Setup(shoppanelSprite1, shoppanelSprite2, 0.5f);
+                foundCount++;
+            }
+        }
+        
+        if (foundCount == 0)
+        {
+             Debug.LogWarning("[DungeonGeneratorV2] No object with name containing 'Shoppanel' found in stage hierarchy!");
+        }
+    }
+    private void SpawnSpecialTiles(Transform stageRoot)
+    {
+        Debug.Log($"[DungeonGeneratorV2] (FixedStage) SpawnSpecialTiles called. Count: {specialTileCount}");
+        // Overload for Fixed Stages
+        if (specialTileCount <= 0)
+        {
+             Debug.Log($"[DungeonGeneratorV2] (FixedStage) SpecialTileCount is {specialTileCount}. Skipping.");
+             return;
+        }
+
+        // Find potential spawn spots (Floor objects)
+        List<Vector3> floorPositions = new List<Vector3>();
+        foreach (Transform t in stageRoot.GetComponentsInChildren<Transform>())
+        {
+            if (t.name.Contains("Floor") || t.tag == "Floor") // Robust check
+            {
+                floorPositions.Add(t.position);
+            }
+        }
+        
+        Debug.Log($"[DungeonGeneratorV2] (FixedStage) Found {floorPositions.Count} floor spots. Spawning {specialTileCount} Special Tiles.");
+
+        if (floorPositions.Count == 0) return;
+
+        for (int i = 0; i < specialTileCount; i++)
+        {
+            if (floorPositions.Count == 0) break;
+            
+            int idx = Random.Range(0, floorPositions.Count);
+            Vector3 pos = floorPositions[idx];
+            floorPositions.RemoveAt(idx);
+            
+            // Adjust Z to match SpecialTile visibility (usually 0 or slightly above floor)
+            // Floors are at Z=0 based on GenerateTiles
+            Vector3 spawnPos = new Vector3(pos.x, pos.y, 0f);
+            
+            GameObject tileObj = new GameObject($"SpecialTile_Fixed_{i}");
+            tileObj.transform.position = spawnPos;
+            tileObj.transform.SetParent(stageRoot);
+            
+            // Setup Sprite
+            SpriteRenderer sr = tileObj.AddComponent<SpriteRenderer>();
+            Sprite sp = specialTileSprite; 
+            if (sp == null)
+            {
+                // Fallback if not assigned in Inspector
+                sp = Resources.Load<Sprite>("item/item_report"); // Legacy fallback
+                if (sp == null) sp = Resources.Load<Sprite>("item/key");
+            }
+            sr.sprite = sp;
+            sr.sortingOrder = 5; 
+            
+            tileObj.AddComponent<SpecialTile>();
+            
+            Debug.Log($"[DungeonGeneratorV2] (FixedStage) Spawned SpecialTile_{i} at {spawnPos}");
+        }
+    }
+
+    private void SpawnSpecialTiles(Transform stageRoot, List<Vector2Int> walkablePositions)
+    {
+        if (specialTileCount <= 0) 
+        {
+            Debug.Log($"[DungeonGeneratorV2] SpecialTileCount is {specialTileCount}. No tiles spawned.");
+            return;
+        }
+        if (walkablePositions == null || walkablePositions.Count == 0) return;
+        
+        Debug.Log($"[DungeonGeneratorV2] Attempting to spawn {specialTileCount} Special Tiles from {walkablePositions.Count} available spots.");
+        
+        List<Vector2Int> available = new List<Vector2Int>(walkablePositions);
+        
+        for (int i = 0; i < specialTileCount; i++)
+        {
+            if (available.Count == 0) break;
+            
+            int idx = Random.Range(0, available.Count);
+            Vector2Int pos = available[idx];
+            available.RemoveAt(idx);
+            
+            Vector3 worldPos = new Vector3(pos.x * tileSize, pos.y * tileSize, 0);
+            
+            GameObject tileObj = new GameObject($"SpecialTile_{i}");
+            tileObj.transform.position = worldPos;
+            tileObj.transform.SetParent(stageRoot);
+            
+            // Setup Sprite
+            SpriteRenderer sr = tileObj.AddComponent<SpriteRenderer>();
+
+            // Use assigned sprite
+            Sprite sp = specialTileSprite;
+            if (sp == null)
+            {
+                // Fallback
+                sp = Resources.Load<Sprite>("item/item_report"); 
+                if (sp == null) sp = Resources.Load<Sprite>("item/key"); 
+                Debug.LogWarning($"[DungeonGeneratorV2] 'specialTileSprite' not assigned in Inspector. Using fallback: {(sp!=null?sp.name:"null")}");
+            }
+            sr.sprite = sp;
+            sr.sortingOrder = 5; // Low order
+            
+            tileObj.AddComponent<SpecialTile>();
+            
+            Debug.Log($"[DungeonGeneratorV2] Spawned SpecialTile_{i} at {pos} (World: {worldPos}) with sprite: {(sp != null ? sp.name : "NULL")}");
+        }
+    }
 }
 
 

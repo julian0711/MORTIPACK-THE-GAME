@@ -22,11 +22,12 @@ public class BreathingAnimation : MonoBehaviour
             spriteRenderer = gameObject.AddComponent<SpriteRenderer>();
         }
         
-        // 初期設定
         if (sprite1 != null)
         {
             spriteRenderer.sprite = sprite1;
         }
+        
+        Debug.Log($"[BreathingAnimation] Setup complete for {gameObject.name}. S1: {sprite1?.name}, S2: {sprite2?.name}, Interval: {interval}");
     }
     
     private void Update()
@@ -41,6 +42,7 @@ public class BreathingAnimation : MonoBehaviour
             isSprite1 = !isSprite1;
             
             spriteRenderer.sprite = isSprite1 ? sprite1 : sprite2;
+            // Debug.Log($"[BreathingAnimation] Swapped sprite for {gameObject.name}. Current: {(isSprite1 ? "Sprite1" : "Sprite2")}");
         }
     }
 }

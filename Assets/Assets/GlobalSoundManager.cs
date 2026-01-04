@@ -8,6 +8,10 @@ public class GlobalSoundManager : MonoBehaviour
     [SerializeField] private AudioSource bgmSource;
     [SerializeField] private AudioClip defaultBGM;
 
+    [Header("音量設定")]
+    [SerializeField] [Range(0f, 1f)] private float bgmVolume = 0.2f;
+    [SerializeField] [Range(0f, 1f)] private float seVolume = 0.3f;
+
     [Header("SE Settings")]
     [SerializeField] private AudioSource seSource;
 
@@ -28,6 +32,7 @@ public class GlobalSoundManager : MonoBehaviour
     public AudioClip talismanSE; // New
     public AudioClip blueboxSE;  // New
     public AudioClip nextFloorSE; // New for Result Button
+    public AudioClip shopResetSE; // Shop Reroll (Assign in Inspector)
 
     private void Awake()
     {
@@ -42,20 +47,32 @@ public class GlobalSoundManager : MonoBehaviour
                 bgmSource = gameObject.AddComponent<AudioSource>();
                 bgmSource.loop = true;
                 bgmSource.playOnAwake = false;
-                bgmSource.volume = 0.2f; // Lowered default BGM volume
             }
             if (seSource == null)
             {
                 seSource = gameObject.AddComponent<AudioSource>();
                 seSource.loop = false;
                 seSource.playOnAwake = false;
-                seSource.volume = 0.3f; // Lowered default SE volume to 0.3
             }
+            
+            UpdateVolumes();
         }
         else
         {
             Destroy(gameObject);
         }
+    }
+    
+    private void Update()
+    {
+        // Allow runtime tweaking
+        UpdateVolumes();
+    }
+
+    private void UpdateVolumes()
+    {
+        if (bgmSource != null) bgmSource.volume = bgmVolume;
+        if (seSource != null) seSource.volume = seVolume;
     }
 
     private void Start()

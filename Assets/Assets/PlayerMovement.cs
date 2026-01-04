@@ -24,13 +24,13 @@ public class PlayerMovement : MonoBehaviour
         targetPosition = transform.position;
         spriteRenderer = GetComponent<SpriteRenderer>(); // Added initialization
 
-        turnManager = Object.FindObjectOfType<TurnManager>();
+        turnManager = Object.FindFirstObjectByType<TurnManager>();
         if (turnManager == null)
         {
             Debug.LogWarning("TurnManager not found in scene!");
         }
         
-        mobileInput = Object.FindObjectOfType<MobileInputController>();
+        mobileInput = Object.FindFirstObjectByType<MobileInputController>();
         if (mobileInput == null)
         {
             GameObject inputObj = new GameObject("MobileInputController");
@@ -40,7 +40,7 @@ public class PlayerMovement : MonoBehaviour
 
         if (GameUIManager.Instance == null)
         {
-            GameUIManager existingUI = Object.FindObjectOfType<GameUIManager>();
+            GameUIManager existingUI = Object.FindFirstObjectByType<GameUIManager>();
             if (existingUI == null)
             {
                 GameObject uiObj = new GameObject("GameUIManager");
@@ -51,7 +51,7 @@ public class PlayerMovement : MonoBehaviour
 
         if (InventoryManager.Instance == null)
         {
-            InventoryManager existingInv = Object.FindObjectOfType<InventoryManager>();
+            InventoryManager existingInv = Object.FindFirstObjectByType<InventoryManager>();
             if (existingInv == null)
             {
                 GameObject invObj = new GameObject("InventoryManager");
@@ -60,7 +60,7 @@ public class PlayerMovement : MonoBehaviour
             }
         }
 
-        dungeonGenerator = Object.FindObjectOfType<DungeonGeneratorV2>();
+        dungeonGenerator = Object.FindFirstObjectByType<DungeonGeneratorV2>();
         if (dungeonGenerator == null)
         {
             Debug.LogError("DungeonGeneratorV2 not found! Movement restriction might fail.");
@@ -114,15 +114,12 @@ public class PlayerMovement : MonoBehaviour
         }
         
         // ... (rest of update)
-        // インタラクション (Eキー or モバイルボタン)
-        if (Input.GetKeyDown(KeyCode.E) || (mobileInput != null && mobileInput.GetInteractDown()))
-        {
-            CheckForInteraction();
-        }
+        // Interaction is now fully handled by HandleSearchButtonInteraction() for both Key and Mobile Button
         
         Vector2 input = GetMovementInput();
         if (input != Vector2.zero)
         {
+            // ... (existing movement logic)
             // Update sprite direction based on horizontal input
             if (spriteRenderer != null)
             {
@@ -136,6 +133,164 @@ public class PlayerMovement : MonoBehaviour
                 }
             }
             TryMove(input);
+        }
+        
+        // Shop Interaction Logic (Search Button Hold)
+        HandleSearchButtonInteraction();
+    }
+    
+    // Shop Interaction Variables
+    private float searchButtonHoldDuration = 0f;
+    private bool shopActionExecuted = false;
+
+    private void HandleSearchButtonInteraction()
+    {
+        // 1. Check if Search Button is Held
+        bool isHeld = Input.GetKey(KeyCode.E);
+        if (mobileInput != null && mobileInput.GetInteractHeld()) isHeld = true;
+
+        if (isHeld)
+        {
+            searchButtonHoldDuration += Time.deltaTime;
+            
+            // 2. Check overlap with ShopItem
+            ShopItem shopItem = GetShopItemAtFeet();
+            if (shopItem != null)
+            {
+                // Long Press (Buy)
+                if (searchButtonHoldDuration >= 0.5f && !shopActionExecuted)
+                {
+                    ExecuteShopPurchase(shopItem);
+                    shopActionExecuted = true; // Prevent multiple buys in one press
+                }
+            }
+            
+            // 3. Check overlap with Vendor (Interactive) - Long Press for Reroll
+            ShopVendor vendor = GetVendorAtFeet();
+            if (vendor != null)
+            {
+                if (searchButtonHoldDuration >= 0.5f && !shopActionExecuted)
+                {
+                    // Reroll Logic
+                    if (GameUIManager.Instance != null && GameUIManager.Instance.TotalPoint >= 5000)
+                    {
+                        if (GameUIManager.Instance.TrySpendPoint(5000))
+                        {
+                            DungeonGeneratorV2 dGen = Object.FindFirstObjectByType<DungeonGeneratorV2>();
+                            if (dGen != null)
+                            {
+                                dGen.RefreshShopItems();
+                                GameUIManager.Instance.ShowMessage("商品を入れ替えました！", "vendor");
+                                
+                                // Play Sound
+                                if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.shopResetSE != null)
+                                {
+                                    GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.shopResetSE);
+                                } 
+                            }
+                        }
+                    }
+                    else
+                    {
+                         GameUIManager.Instance.ShowMessage("ポイントが足りないようだね… (必要: 5000Pt)", "vendor");
+                    }
+                    
+                    shopActionExecuted = true;
+                }
+            }
+        }
+        else
+        {
+            // Button Released
+            if (searchButtonHoldDuration > 0f)
+            {
+                // Verify if it was a short press
+                if (searchButtonHoldDuration < 0.5f && !shopActionExecuted)
+                {
+                    // Short Press Logic
+                    
+                    // A. Shop Item (Show Price)
+                    ShopItem shopItem = GetShopItemAtFeet();
+                    if (shopItem != null)
+                    {
+                        GameUIManager.Instance.ShowMessage($"{shopItem.price}Ptです！ご購入は長押しで！", shopItem.itemId);
+                    }
+                    else
+                    {
+                        // B. Vendor Interaction
+                        ShopVendor vendor = GetVendorAtFeet();
+                        if (vendor != null)
+                        {
+                             GameUIManager.Instance.ShowMessage("5000pointで商品を入れ替えますか？？(長押し)", "vendor");
+                        }
+                        else
+                        {
+                            // C. Standard Interaction (Shelf, etc.)
+                            CheckForInteraction();
+                        }
+                    }
+                }
+                
+                // Reset
+                searchButtonHoldDuration = 0f;
+                shopActionExecuted = false;
+            }
+        }
+    }
+
+    private ShopItem GetShopItemAtFeet()
+    {
+        Collider2D[] hits = Physics2D.OverlapCircleAll(transform.position, 0.4f);
+        foreach (var hit in hits)
+        {
+            ShopItem item = hit.GetComponent<ShopItem>();
+            if (item != null) return item;
+        }
+        return null;
+    }
+
+    private ShopVendor GetVendorAtFeet()
+    {
+        Collider2D[] hits = Physics2D.OverlapCircleAll(transform.position, 0.4f);
+        foreach (var hit in hits)
+        {
+            ShopVendor vendor = hit.GetComponent<ShopVendor>();
+            if (vendor != null) return vendor;
+        }
+        return null;
+    }
+    
+    // Removed old Raycast logic
+    /* 
+    private void HandleShopInteraction() { ... } 
+    */
+    
+    private void ExecuteShopPurchase(ShopItem shopItem)
+    {
+        if (shopItem == null) return;
+        
+        if (GameUIManager.Instance != null)
+        {
+            // Use TotalPoint (Currency) instead of StageScore
+            if (GameUIManager.Instance.TrySpendPoint(shopItem.price))
+            {
+                // Purchase Success (Point deduction handled in TrySpendPoint)
+                InventoryManager.Instance.AddItem(shopItem.itemId);
+                
+                GameUIManager.Instance.ShowMessage($"ありがとうございました～！", shopItem.itemId);
+                GameUIManager.Instance.ShowFloatingItem(shopItem.itemId, shopItem.transform.position);
+                
+                if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.getSE != null)
+                {
+                    GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.getSE);
+                }
+                
+                Destroy(shopItem.gameObject);
+            }
+            else
+            {
+                GameUIManager.Instance.ShowMessage($"おや、pointが足りないね ({shopItem.price}pt必要)");
+            }
         }
     }
 
@@ -155,7 +310,7 @@ public class PlayerMovement : MonoBehaviour
         // Sprite
         SpriteRenderer sr = bullet.AddComponent<SpriteRenderer>();
         // Placeholder sprite: reuse "item_coin" (warpcoin) image for the bullet
-        Sprite bulletSprite = Resources.Load<Sprite>("item/item_coin"); 
+        Sprite bulletSprite = Resources.Load<Sprite>("item/item_warpcoin"); 
         if (bulletSprite == null) 
         {
             // Fallback try simple item_
@@ -196,15 +351,27 @@ public class PlayerMovement : MonoBehaviour
     private void CheckForInteraction()
     {
         // 足元のタイルをチェック
-        Collider2D hit = Physics2D.OverlapCircle(transform.position, 0.4f);
+        Collider2D[] hits = Physics2D.OverlapCircleAll(transform.position, 0.4f);
         
-        if (hit != null)
+        foreach(var hit in hits)
         {
+            // 1. Check for Shelf
             InteractableShelf shelf = hit.GetComponent<InteractableShelf>();
             if (shelf != null)
             {
                 shelf.Interact(transform.position);
+                continue; // Shelf interaction done
             }
+            
+            // 2. Check for ShopItem (Removed - Moved to Touch Interaction)
+            /*
+            ShopItem shopItem = hit.GetComponent<ShopItem>();
+            if (shopItem != null)
+            {
+                 // ... Old Logic ...
+                 return;
+            }
+            */
         }
     }
     
@@ -400,10 +567,9 @@ public class PlayerMovement : MonoBehaviour
                     return;
                 }
 
-                // Check for Substitute Doll
-                if (InventoryManager.Instance != null && InventoryManager.Instance.HasItem("doll"))
+                if (InventoryManager.Instance != null && InventoryManager.Instance.HasItem("migawari"))
                 {
-                    Debug.Log("[PlayerMovement] Doll activated! Preventing Game Over.");
+                    Debug.Log("[PlayerMovement] Migawari activated! Preventing Game Over.");
                     StartCoroutine(ActivateDollSequence(enemy));
                     return; // Stop processing collision (prevent Game Over)
                 }
@@ -426,13 +592,13 @@ public class PlayerMovement : MonoBehaviour
         isMoving = false;
 
         // 2. Message & Visuals
-        GameUIManager.Instance.ShowMessage("身代わり人形が身代わりになった！", "doll");
+        GameUIManager.Instance.ShowMessage("身代わり人形が身代わりになった！", "migawari");
         if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.migawariSE != null)
         {
             GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.migawariSE);
         }
         // Optional: Show floating doll icon?
-        GameUIManager.Instance.ShowFloatingItem("doll", transform.position);
+        GameUIManager.Instance.ShowFloatingItem("migawari", transform.position);
 
         // 3. Wait 0.5s
         yield return new WaitForSeconds(0.5f);
@@ -440,7 +606,7 @@ public class PlayerMovement : MonoBehaviour
         // 4. Consume Item & Apply Effect
         if (InventoryManager.Instance != null)
         {
-            InventoryManager.Instance.RemoveItem("doll");
+            InventoryManager.Instance.RemoveItem("migawari");
         }
         
         if (enemy != null)
@@ -464,6 +630,35 @@ public class PlayerMovement : MonoBehaviour
                 // Case-insensitive check to cover "Door", "door", "door_shop", etc.
                 if (hit.name.IndexOf("door", System.StringComparison.OrdinalIgnoreCase) >= 0)
                 {
+                    // Special Case: Shop Door
+                    if (hit.name.IndexOf("Shop", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        if (InventoryManager.Instance.HasItem("key"))
+                        {
+                            Debug.Log("[PlayerMovement] Shop Door reached with Key. Entering Shop...");
+                            if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.doorSE != null)
+                            {
+                                GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.doorSE);
+                            }
+                            
+                            if (dungeonGenerator != null)
+                            {
+                                // Flag next stage as Shop
+                                GameUIManager.Instance.NextStageIsShop = true;
+                                
+                                // Trigger Result Screen (which handles Point Add -> Next Button -> Load Scene)
+                                Debug.Log("[PlayerMovement] Shop Door reached. Flagging Shop and showing Result Screen.");
+                                GameUIManager.Instance.ShowResultScreen();
+                            }
+                        }
+                        else
+                        {
+                            Debug.Log("[PlayerMovement] Shop Door reached but no Key.");
+                            GameUIManager.Instance.ShowMessage("鍵が必要だ。");
+                        }
+                        return; // Exit immediately
+                    }
+
                     if (InventoryManager.Instance.HasItem("key"))
                     {
                         if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.doorSE != null)
@@ -477,6 +672,7 @@ public class PlayerMovement : MonoBehaviour
                     else
                     {
                         Debug.Log("[PlayerMovement] Door reached but no Key (or key missing in InventoryManager).");
+                        GameUIManager.Instance.ShowMessage("鍵が必要だ。");
                     }
                 }
             }
@@ -617,8 +813,8 @@ public class PlayerMovement : MonoBehaviour
         Sprite bulletSprite = Resources.Load<Sprite>("item/item_warp_gun_shot"); 
         if (bulletSprite == null) 
         {
-            // Fallback if not found (though user said it exists)
-            bulletSprite = Resources.Load<Sprite>("item/item_coin");
+            // Fallback
+            bulletSprite = Resources.Load<Sprite>("item/item_warpcoin");
         }
         sr.sprite = bulletSprite;
         sr.color = Color.white; // Correct Color: White

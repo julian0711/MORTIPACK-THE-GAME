@@ -13,7 +13,7 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         {
             if (_instance == null)
             {
-                _instance = FindObjectOfType<GameUIManager>();
+                _instance = FindFirstObjectByType<GameUIManager>();
                 if (_instance == null)
                 {
                      // Lazy instantiation: Create if missing
@@ -41,11 +41,16 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
 
     [SerializeField] private Canvas canvas;
     [SerializeField] private Font customFont;
+    
+    // Stage Transition
+    public GameObject nextStagePrefab; 
+
     // private Image loadingOverlay; // This is now serialized as a GameObject above
 
     // [Removed unused CreateLoadingOverlay method]
 
     public int CurrentFloor { get; private set; } = 1;
+    public bool NextStageIsShop { get; set; } = false; // Flag for Shop transition
     
     // Score Variables
     public int TotalScore { get; private set; } = 0;
@@ -160,20 +165,53 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
 
         if (floorText != null)
         {
-            // Format: Score:100 B1 (Shows Stage Score only per user request)
-            floorText.text = $"Score:{StageScore} B{CurrentFloor}";
+            // Format: Score:100 Pt:500 B1
+            floorText.text = $"Score:{StageScore} Pt:{TotalPoint} B{CurrentFloor}";
             // Ensure visible
             if (!floorText.gameObject.activeInHierarchy) floorText.gameObject.SetActive(true);
         }
     }
     
+    private DungeonGeneratorV2 cachedDungeon;
+    private DungeonGeneratorV2 CurrentDungeon
+    {
+        get
+        {
+            if (cachedDungeon == null) cachedDungeon = FindFirstObjectByType<DungeonGeneratorV2>();
+            return cachedDungeon;
+        }
+    }
+
     public void AddScore(int points)
     {
+        // Fix: No score in Shop (Fixed Stage), BUT allow deduction (spending)
+        if (CurrentDungeon != null && CurrentDungeon.IsFixedStage)
+        {
+            if (points > 0) return; // Block gain
+            // Allow deduction (points < 0)
+        }
+
         // Only add to Stage Score
-        // TotalScore += points;
         StageScore += points;
+        
+        // Immediate TotalPoint addition removed (Defer to Result Screen)
+        // if (points > 0) TotalPoint += points;
+
         UpdateFloorText();
-        Debug.Log($"[Score] Added {points}. Total: {TotalScore}, Stage: {StageScore}");
+        Debug.Log($"[Score] Added {points}. TotalScore:{TotalScore} TotalPoint:{TotalPoint} Stage:{StageScore}");
+    }
+    
+    // New Method for Purchasing
+    public bool TrySpendPoint(int cost)
+    {
+        if (TotalPoint >= cost)
+        {
+            TotalPoint -= cost;
+            UpdateFloorText();
+            Debug.Log($"[Point] Spent {cost}. Remaining TotalPoint: {TotalPoint}");
+            return true;
+        }
+        return false;
     }
 
     // ... (Transition Logic) ...
@@ -183,23 +221,27 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
 
     public void ProceedToNextFloor()
     {
-        Debug.Log($"[GameUIManager] ProceedToNextFloor Clicked. Flag: {isTransitioningToNextFloor}, Button: {(nextFloorButton != null ? nextFloorButton.interactable : "NULL")}");
+        Debug.Log($"[GameUIManager] ProceedToNextFloor Clicked. Triggering Result Screen.");
 
-        // Play SE
+        // Show Result Screen instead of immediate load
+        ShowResultScreen();
+    }
+
+    public void LoadNextFloor()
+    {
+        // 1. Double check flag
+        if (isTransitioningToNextFloor) 
+        {
+            return;
+        }
+
         // Play SE
         if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.nextFloorSE != null)
         {
             GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.nextFloorSE);
         }
-        
-        // 1. Double check flag
-        if (isTransitioningToNextFloor) 
-        {
-            Debug.Log("[GameUIManager] Blocked ProceedToNextFloor because isTransitioningToNextFloor is TRUE.");
-            return;
-        }
 
-        // LOCK IMMEDIATELY to prevent double clicks during delay
+        // LOCK IMMEDIATELY
         isTransitioningToNextFloor = true;
         
         // 2. Disable button immediately
@@ -232,11 +274,21 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         // OR start fading immediately. For now, just wait.
         yield return new WaitForSeconds(sceneLoadDelay);
 
-        CurrentFloor++;
+        if (!NextStageIsShop)
+        {
+            if (!NextStageIsShop)
+        {
+            CurrentFloor++;
+        }
+        }
         StageScore = 0; // Reset Stage Score for new floor
         UpdateFloorText(); // Refresh UI before load/during fade
         
-        if (InventoryManager.Instance != null) InventoryManager.Instance.RemoveItem("key");
+        // Create "Shop" conditional key removal
+        if (!NextStageIsShop)
+        {
+            if (InventoryManager.Instance != null) InventoryManager.Instance.RemoveItem("key");
+        }
         
         // Hide ResultScreen before scene transition? NO, keep it to cover the map!
         // if (resultScreenPanel != null) resultScreenPanel.SetActive(false);
@@ -245,7 +297,7 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         // isTransitioningToNextFloor = true; // Moved to ProceedToNextFloor for immediate lock 
         
         // Re-enable player input for the new scene
-        PlayerMovement pm = FindObjectOfType<PlayerMovement>();
+        PlayerMovement pm = FindFirstObjectByType<PlayerMovement>();
         if (pm != null) pm.SetInputEnabled(true);
         
         SceneManager.LoadScene(SceneManager.GetActiveScene().name);
@@ -593,11 +645,9 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         if (nextFloorButton != null)
         {
             nextFloorButton.onClick.RemoveAllListeners();
-            nextFloorButton.onClick.RemoveAllListeners();
-            nextFloorButton.onClick.AddListener(ProceedToNextFloor);
-            nextFloorButton.onClick.AddListener(ProceedToNextFloor);
-            nextFloorButton.interactable = true; // Insurance: Ensure enabled by default
-            Debug.Log("[GameUIManager] InitializeUI: NextFloorButton found and listener added.");
+            nextFloorButton.onClick.AddListener(LoadNextFloor); // Fixed: Bind to LoadNextFloor
+            nextFloorButton.interactable = true;
+            Debug.Log("[GameUIManager] InitializeUI: NextFloorButton bound to LoadNextFloor.");
             
             Transform textObj = nextFloorButton.transform.Find("Text");
             if (textObj != null) initialTextScale = textObj.localScale;
@@ -732,7 +782,7 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         
         handler.OnClick = () => {
             ItemDatabase itemMgr = ItemDatabase.Instance;
-            if (itemMgr == null) itemMgr = FindObjectOfType<ItemDatabase>();
+            if (itemMgr == null) itemMgr = FindFirstObjectByType<ItemDatabase>();
 
             if (itemMgr != null)
             {
@@ -808,7 +858,7 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         resultScreenPanel.SetActive(true);
         
         // Disable Player Control
-        PlayerMovement pm = FindObjectOfType<PlayerMovement>();
+        PlayerMovement pm = FindFirstObjectByType<PlayerMovement>();
         if (pm != null)
         {
             pm.SetInputEnabled(false);
@@ -951,7 +1001,7 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         ShowMessage("GAME OVER", "death");
 
         // Disable Player Control
-        PlayerMovement pm = FindObjectOfType<PlayerMovement>();
+        PlayerMovement pm = FindFirstObjectByType<PlayerMovement>();
         if (pm != null)
         {
             pm.SetInputEnabled(false);
@@ -1055,21 +1105,29 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         
         string filename = "";
         
+        // Check for specific overrides if needed, otherwise default to item_<key>
         switch (key)
         {
             case "key": filename = "key"; break;
-            case "warpcoin": filename = "item_coin"; break;
-            case "doll": filename = "item_migawari"; break;
             case "radar": filename = "item_radar"; break;
             case "hallucinogen": filename = "item_radar"; break; // User specified to use radar image
             case "report": filename = "item_report"; break;
             case "radio": filename = "item_radio"; break;
-            default: filename = "item_" + key; break;
+            default: filename = $"item_{key}"; break;
         }
         
         // Load from Assets/Resources/item/
         string path = "item/" + filename;
         Sprite sprite = Resources.Load<Sprite>(path);
+        
+        if (sprite == null)
+        {
+             Debug.LogError($"[GameUIManager] Failed to load sprite at path: '{path}' (Key: {key})");
+        }
+        else
+        {
+             // Debug.Log($"[GameUIManager] Loaded sprite: {path}");
+        }
         
         if (sprite == null)
         {
@@ -1095,35 +1153,45 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         switch (key)
         {
             case "warpcoin":
-                DungeonGeneratorV2 dungeon = FindObjectOfType<DungeonGeneratorV2>();
-                PlayerMovement player = FindObjectOfType<PlayerMovement>();
+                DungeonGeneratorV2 dungeon = FindFirstObjectByType<DungeonGeneratorV2>();
+                PlayerMovement player = FindFirstObjectByType<PlayerMovement>();
                 
                 if (dungeon != null && player != null)
                 {
                     Vector3 bestPos = Vector3.zero;
                     bool foundSafePos = false;
 
-                    // 安全なワープ先（エネミーがいない場所）を探す
-                    // 最大20回試行する
-                    for (int i = 0; i < 20; i++)
+                    if (dungeon.IsFixedStage)
                     {
-                        Vector3 candidatePos = dungeon.GetRandomWalkablePosition();
-                        Collider2D[] hits = Physics2D.OverlapCircleAll(candidatePos, 0.4f);
-                        bool hasEnemy = false;
-                        foreach (var hit in hits)
+                        // Fixed Stage: Warp to Start Position
+                        bestPos = dungeon.CurrentFixedSpawnPoint;
+                        foundSafePos = true;
+                        Debug.Log("[GameUIManager] Fixed Stage detected. Warping to Spawn Point.");
+                    }
+                    else
+                    {
+                        // Normal Dungeon: Find Random Safe Position
+                        // 最大20回試行する
+                        for (int i = 0; i < 20; i++)
                         {
-                            if (hit.GetComponent<EnemyMovement>() != null)
+                            Vector3 candidatePos = dungeon.GetRandomWalkablePosition();
+                            Collider2D[] hits = Physics2D.OverlapCircleAll(candidatePos, 0.4f);
+                            bool hasEnemy = false;
+                            foreach (var hit in hits)
                             {
-                                hasEnemy = true;
+                                if (hit.GetComponent<EnemyMovement>() != null)
+                                {
+                                    hasEnemy = true;
+                                    break;
+                                }
+                            }
+
+                            if (!hasEnemy)
+                            {
+                                bestPos = candidatePos;
+                                foundSafePos = true;
                                 break;
                             }
-                        }
-
-                        if (!hasEnemy)
-                        {
-                            bestPos = candidatePos;
-                            foundSafePos = true;
-                            break;
                         }
                     }
 
@@ -1148,7 +1216,7 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
                 break;
 
             case "warp_gun":
-                PlayerMovement pm = FindObjectOfType<PlayerMovement>();
+                PlayerMovement pm = FindFirstObjectByType<PlayerMovement>();
                 if (pm != null)
                 {
                     pm.EnterShootingMode();
@@ -1159,7 +1227,7 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
                 break;
 
             case "radio":
-                TurnManager turnManager = FindObjectOfType<TurnManager>();
+                TurnManager turnManager = FindFirstObjectByType<TurnManager>();
                 if (turnManager != null)
                 {
                     if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.radioSE != null)
@@ -1175,7 +1243,7 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
                 break;
 
             case "map": 
-                DungeonGeneratorV2 dungeonMap = FindObjectOfType<DungeonGeneratorV2>();
+                DungeonGeneratorV2 dungeonMap = FindFirstObjectByType<DungeonGeneratorV2>();
                 if (dungeonMap != null)
                 {
                     dungeonMap.RevealRandomAreas(3);
@@ -1186,7 +1254,7 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
                 break;
                 
             case "radar":
-                DungeonGeneratorV2 dGenRadar = FindObjectOfType<DungeonGeneratorV2>();
+                DungeonGeneratorV2 dGenRadar = FindFirstObjectByType<DungeonGeneratorV2>();
                 if (dGenRadar != null)
                 {
                     if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.radarSE != null)
@@ -1202,7 +1270,7 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
                 break;
 
             case "talisman":
-                DungeonGeneratorV2 dGenTalisman = FindObjectOfType<DungeonGeneratorV2>();
+                DungeonGeneratorV2 dGenTalisman = FindFirstObjectByType<DungeonGeneratorV2>();
                 if (dGenTalisman != null)
                 {
                     if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.talismanSE != null)
@@ -1225,8 +1293,8 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
                 break;
                 
             case "bluebox":
-                PlayerMovement pmBlue = FindObjectOfType<PlayerMovement>();
-                DungeonGeneratorV2 dGenBlue = FindObjectOfType<DungeonGeneratorV2>();
+                PlayerMovement pmBlue = FindFirstObjectByType<PlayerMovement>();
+                DungeonGeneratorV2 dGenBlue = FindFirstObjectByType<DungeonGeneratorV2>();
                 
                 if (pmBlue != null && dGenBlue != null)
                 {

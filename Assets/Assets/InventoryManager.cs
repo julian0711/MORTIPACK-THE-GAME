@@ -12,8 +12,9 @@ public class InventoryManager : MonoBehaviour
     // Event when inventory changes
     public event Action OnInventoryChanged;
 
-    [Header("Debug")]
+    [Header("デバッグ設定")]
     [SerializeField] private bool debugStartWithKey = false;
+    [SerializeField] private bool debugStartWithAllItems = false;
 
     private void Awake()
     {
@@ -34,6 +35,22 @@ public class InventoryManager : MonoBehaviour
         {
             AddItem("key");
             Debug.Log("[InventoryManager] Debug: Added initial key.");
+        }
+
+        if (debugStartWithAllItems)
+        {
+            Debug.Log("[InventoryManager] Debug: Adding ALL items (except key).");
+            if (ItemDatabase.Instance != null)
+            {
+                foreach (var itemData in ItemDatabase.Instance.shelfDropTable)
+                {
+                    if (itemData.key != "nothing" && itemData.key != "report") // 'nothing' is empty, 'report' is score
+                    {
+                        // Add 1 of each item
+                        AddItem(itemData.key);
+                    }
+                }
+            }
         }
     }
 

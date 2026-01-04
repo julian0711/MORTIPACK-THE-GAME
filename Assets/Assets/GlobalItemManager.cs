@@ -10,17 +10,17 @@ public class GlobalItemManager : MonoBehaviour
     [SerializeField]
     public List<InteractableShelf.DropItem> shelfDropTable = new List<InteractableShelf.DropItem>()
     {
-        new InteractableShelf.DropItem("nothing", "何もなし", 1200, "ただの埃だ。"),
-        new InteractableShelf.DropItem("report", "研究資料", 100, "古い研究資料のようだ。 Score+100"),
-        new InteractableShelf.DropItem("radar", "探知機", 100, "隠されたものを見つける装置。"),
-        new InteractableShelf.DropItem("hallucinogen", "幻覚剤", 100, "飲むと意識が朦朧とする。"),
-        new InteractableShelf.DropItem("warpcoin", "ワープコイン", 100, "不思議な力が宿るコイン。"),
-        new InteractableShelf.DropItem("map", "マップ", 100, "この階層の地図。"),
-        new InteractableShelf.DropItem("warp_gun", "転送銃", 100, "瞬間移動を可能にする銃。"),
-        new InteractableShelf.DropItem("doll", "身代わり人形", 80, "致命傷を一度だけ防ぐ。"),
-        new InteractableShelf.DropItem("radio", "ラジカセ", 80, "ノイズ混じりの音がする。"),
-        new InteractableShelf.DropItem("talisman", "タリスマン", 50, "不吉な気配を遠ざけるお守り。"),
-        new InteractableShelf.DropItem("bluebox", "青い箱", 50, "謎の青い箱。中身は？")
+        new InteractableShelf.DropItem("nothing", "何もなし", 1200, 0, "ただの埃だ。"),
+        new InteractableShelf.DropItem("report", "研究資料", 100, 500, "古い研究資料のようだ。 Score+100"),
+        new InteractableShelf.DropItem("radar", "探知機", 100, 800, "隠されたものを見つける装置。"),
+        new InteractableShelf.DropItem("hallucinogen", "幻覚剤", 100, 500, "飲むと意識が朦朧とする。"),
+        new InteractableShelf.DropItem("warpcoin", "ワープコイン", 100, 1000, "不思議な力が宿るコイン。"),
+        new InteractableShelf.DropItem("map", "マップ", 100, 500, "この階層の地図。"),
+        new InteractableShelf.DropItem("warp_gun", "転送銃", 100, 1500, "瞬間移動を可能にする銃。"),
+        new InteractableShelf.DropItem("migawari", "身代わり人形", 80, 2000, "致命傷を一度だけ防ぐ。"),
+        new InteractableShelf.DropItem("radio", "ラジカセ", 80, 1200, "ノイズ混じりの音がする。"),
+        new InteractableShelf.DropItem("talisman", "タリスマン", 50, 2500, "不吉な気配を遠ざけるお守り。"),
+        new InteractableShelf.DropItem("bluebox", "青い箱", 50, 5000, "謎の青い箱。中身は？")
     };
 
     private void Awake()
@@ -49,17 +49,17 @@ public class GlobalItemManager : MonoBehaviour
     {
         shelfDropTable = new List<InteractableShelf.DropItem>()
         {
-            new InteractableShelf.DropItem("nothing", "何もなし", 1200, "ただの埃だ。"),
-            new InteractableShelf.DropItem("report", "研究資料", 100, "古い研究資料のようだ。 Score+100"),
-            new InteractableShelf.DropItem("radar", "探知機", 100, "隠されたものを見つける装置。"),
-            new InteractableShelf.DropItem("hallucinogen", "幻覚剤", 100, "飲むと意識が朦朧とする。"),
-            new InteractableShelf.DropItem("warpcoin", "ワープコイン", 100, "不思議な力が宿るコイン。"),
-            new InteractableShelf.DropItem("map", "マップ", 100, "この階層の地図。"),
-            new InteractableShelf.DropItem("warp_gun", "転送銃", 100, "瞬間移動を可能にする銃。"),
-            new InteractableShelf.DropItem("doll", "身代わり人形", 80, "致命傷を一度だけ防ぐ。"),
-            new InteractableShelf.DropItem("radio", "ラジカセ", 80, "ノイズ混じりの音がする。"),
-            new InteractableShelf.DropItem("talisman", "タリスマン", 50, "不吉な気配を遠ざけるお守り。"),
-            new InteractableShelf.DropItem("bluebox", "青い箱", 50, "謎の青い箱。中身は？")
+            new InteractableShelf.DropItem("nothing", "何もなし", 1200, 0, "ただの埃だ。"),
+            new InteractableShelf.DropItem("report", "研究資料", 100, 500, "古い研究資料のようだ。 Score+100"),
+            new InteractableShelf.DropItem("radar", "探知機", 100, 800, "隠されたものを見つける装置。"),
+            new InteractableShelf.DropItem("hallucinogen", "幻覚剤", 100, 500, "飲むと意識が朦朧とする。"),
+            new InteractableShelf.DropItem("warpcoin", "ワープコイン", 100, 1000, "不思議な力が宿るコイン。"),
+            new InteractableShelf.DropItem("map", "マップ", 100, 500, "この階層の地図。"),
+            new InteractableShelf.DropItem("warp_gun", "転送銃", 100, 1500, "瞬間移動を可能にする銃。"),
+            new InteractableShelf.DropItem("migawari", "身代わり人形", 80, 2000, "致命傷を一度だけ防ぐ。"),
+            new InteractableShelf.DropItem("radio", "ラジカセ", 80, 1200, "ノイズ混じりの音がする。"),
+            new InteractableShelf.DropItem("talisman", "タリスマン", 50, 2500, "不吉な気配を遠ざけるお守り。"),
+            new InteractableShelf.DropItem("bluebox", "青い箱", 50, 5000, "謎の青い箱。中身は？")
         };
         Debug.Log("[ItemManager] Drop Table reset to defaults.");
     }
