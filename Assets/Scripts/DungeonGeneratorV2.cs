@@ -52,6 +52,10 @@ public class DungeonGeneratorV2 : MonoBehaviour
     [Range(0, 10)] public int specialTileCount = 0;
     public Sprite specialTileSprite; // Added for Inspector assignment
 
+    [Header("ステージ生成バリエーション")]
+    [SerializeField] private float defaultWeight = 50f;
+    [SerializeField] private List<DungeonProfile> profiles = new List<DungeonProfile>();
+
     public Vector3 GetRandomWalkablePosition()
     {
         if (rooms == null || rooms.Count == 0) return Vector3.zero;
@@ -154,9 +158,75 @@ public class DungeonGeneratorV2 : MonoBehaviour
     public bool IsFixedStage => isFixedStage;
     public Vector3 CurrentFixedSpawnPoint { get; private set; }
 
+    private void ApplyRandomProfile()
+    {
+        int currentFloor = GameUIManager.Instance != null ? GameUIManager.Instance.CurrentFloor : 1;
+        
+        // 1. Valid Profiles (CurrentFloor >= startFloor)
+        List<DungeonProfile> validProfiles = new List<DungeonProfile>();
+        foreach(var p in profiles)
+        {
+            if (currentFloor >= p.startFloor)
+            {
+                validProfiles.Add(p);
+            }
+        }
+
+        // 2. Weight Calculation
+        float totalWeight = defaultWeight;
+        foreach(var p in validProfiles) totalWeight += p.weight;
+
+        // 3. Selection
+        float randomPoint = Random.Range(0, totalWeight);
+        
+        // Check Default First
+        if (randomPoint < defaultWeight)
+        {
+            Debug.Log($"[DungeonGenerator] Selected Profile: DEFAULT (Floor: {currentFloor})");
+            return; // Use default inspector values
+        }
+        
+        randomPoint -= defaultWeight;
+
+        // Check Profiles
+        foreach(var p in validProfiles)
+        {
+            if (randomPoint < p.weight)
+            {
+                ApplyProfile(p);
+                return;
+            }
+            randomPoint -= p.weight;
+        }
+    }
+
+    private void ApplyProfile(DungeonProfile p)
+    {
+        Debug.Log($"[DungeonGenerator] Selected Profile: {p.profileID}");
+        
+        // Only override if value > 0 (treating 0 as "Use Common Settings")
+        if (p.gridWidth > 0) this.gridWidth = p.gridWidth;
+        if (p.gridHeight > 0) this.gridHeight = p.gridHeight;
+        if (p.minRooms > 0) this.minRooms = p.minRooms;
+        if (p.maxRooms > 0) this.maxRooms = p.maxRooms;
+        if (p.minRoomSize > 0) this.minRoomSize = p.minRoomSize;
+        if (p.maxRoomSize > 0) this.maxRoomSize = p.maxRoomSize;
+        
+        if (p.minEnemies > 0) this.minEnemies = p.minEnemies;
+        if (p.maxEnemies > 0) this.maxEnemies = p.maxEnemies;
+        
+        if (p.minShelvesPerRoom > 0) this.minShelvesPerRoom = p.minShelvesPerRoom;
+        if (p.maxShelvesPerRoom > 0) this.maxShelvesPerRoom = p.maxShelvesPerRoom;
+        
+        if (p.specialTileCount > 0) this.specialTileCount = p.specialTileCount;
+    }
+
     private void GenerateDungeon()
     {
         Debug.Log($"[DungeonGeneratorV2] GenerateDungeon Called. useFixedStageDebug: {useFixedStageDebug}, Prefab: {(debugFixedStagePrefab != null ? debugFixedStagePrefab.name : "null")}");
+
+        // 0. Apply Random Profile (Variation)
+        ApplyRandomProfile();
 
         // 1. Fixed Stage Debug Check
         if (useFixedStageDebug && debugFixedStagePrefab != null)
@@ -722,17 +792,38 @@ public class DungeonGeneratorV2 : MonoBehaviour
 
         Vector2Int playerPos = (rooms.Count > 0) ? rooms[0].Center() : new Vector2Int(-1, -1);
         
-        for (int i = 0; i < enemyCount && i < rooms.Count; i++)
+        // Track spawn counts per room
+        Dictionary<Room, int> roomSpawnCounts = new Dictionary<Room, int>();
+        foreach(var r in rooms) roomSpawnCounts[r] = 0;
+
+        int maxEnemiesPerRoom = 2; // Increased limit per user request
+        int globalAttempts = 0;
+        int maxGlobalAttempts = enemyCount * 20; // Safety breaker
+
+        while (spawned < enemyCount && globalAttempts < maxGlobalAttempts)
         {
-            Room room = rooms[i];
+            globalAttempts++;
             
+            // Pick a random room
+            if (rooms.Count == 0) break;
+            Room room = rooms[Random.Range(0, rooms.Count)];
+
+            // Check room capacity
+            if (roomSpawnCounts[room] >= maxEnemiesPerRoom)
+            {
+                continue; // Try another room
+            }
+
+            // Attempt to place in this room
+            bool placed = false;
             for (int attempt = 0; attempt < 10; attempt++)
             {
                 int x = Random.Range(room.x + 1, room.x + room.width - 1);
                 int y = Random.Range(room.y + 1, room.y + room.height - 1);
 
-                // プレイヤーと同じ位置ならスキップ
-                if (i == 0 && x == playerPos.x && y == playerPos.y)
+                // Skip if on player (only for first room/player pos check, though player could be anywhere)
+                // Roughly check distance from player start
+                if (Mathf.Abs(x - playerPos.x) < 2 && Mathf.Abs(y - playerPos.y) < 2)
                 {
                     continue;
                 }
@@ -773,16 +864,20 @@ public class DungeonGeneratorV2 : MonoBehaviour
                     {
                         col = enemy.AddComponent<BoxCollider2D>();
                     }
-                    col.isTrigger = true; // Make it a trigger so it doesn't physically block, but triggers events
+                    col.isTrigger = true; 
                     
-                    Debug.Log($"Enemy spawned at: ({x}, {y})");
+                    Debug.Log($"Enemy spawned at: ({x}, {y}) in Room count: {roomSpawnCounts[room]}");
+                    
                     spawned++;
+                    roomSpawnCounts[room]++;
+                    placed = true;
+                    Debug.Log($"Enemy placed: {placed}"); // Silence warning
                     break;
                 }
             }
         }
         
-        Debug.Log($"Total enemies spawned: {spawned}");
+        Debug.Log($"Total enemies spawned: {spawned} (Requested: {enemyCount})");
     }
     
     private bool isFixedStage = false;
@@ -977,17 +1072,26 @@ public class DungeonGeneratorV2 : MonoBehaviour
         }
     }
 
-    public int BanishEnemies()
+    public int BanishEnemies(int maxCount = 0)
     {
         EnemyMovement[] enemies = FindObjectsByType<EnemyMovement>(FindObjectsSortMode.None);
         if (enemies.Length == 0) return 0;
 
-        // Weight Logic: 1->50%, 2->30%, 3->20%
-        int countToRemove = 1;
-        float roll = Random.value;
-        if (roll < 0.5f) countToRemove = 1;       // 0.0 - 0.5
-        else if (roll < 0.8f) countToRemove = 2;  // 0.5 - 0.8
-        else countToRemove = 3;                   // 0.8 - 1.0
+        int countToRemove = 0;
+
+        if (maxCount > 0)
+        {
+            // Use specified fixed count
+            countToRemove = maxCount;
+        }
+        else
+        {
+            // Default Weight Logic: 1->50%, 2->30%, 3->20%
+            float roll = Random.value;
+            if (roll < 0.5f) countToRemove = 1;       // 0.0 - 0.5
+            else if (roll < 0.8f) countToRemove = 2;  // 0.5 - 0.8
+            else countToRemove = 3;                   // 0.8 - 1.0
+        }
 
         int removedCount = 0;
         List<EnemyMovement> enemyList = new List<EnemyMovement>(enemies);
@@ -1005,11 +1109,12 @@ public class DungeonGeneratorV2 : MonoBehaviour
             removedCount++;
         }
         
-        Debug.Log($"[DungeonGeneratorV2] Banished {removedCount} enemies (Rolled for {countToRemove + removedCount}).");
+        Debug.Log($"[DungeonGeneratorV2] Banished {removedCount} enemies (Requested: {(maxCount > 0 ? maxCount.ToString() : "Random")}).");
         return removedCount;
     }
 
 #if UNITY_EDITOR
+
     private void OnValidate()
     {
         if (enemyDanceSprite == null)
@@ -1236,7 +1341,52 @@ public class DungeonGeneratorV2 : MonoBehaviour
         
         if (GameUIManager.Instance != null)
         {
-            GameUIManager.Instance.ShowMessage("いらっしゃい～！", "vendor");
+            GameUIManager.Instance.ShowMessage(ItemDatabase.Instance.vendorMessageConfig.welcome, "vendor");
+        }
+
+        // Setup Trash Can
+        GameObject trashObj = GameObject.Find("trash");
+        
+        if (trashObj == null)
+        {
+            // Use recursive search 
+            Transform trashTrans = RecursiveSearch(transform, "trash");
+            if (trashTrans != null) 
+            {
+                trashObj = trashTrans.gameObject;
+            }
+            else
+            {
+                Debug.LogWarning("[DungeonGeneratorV2] Trash object NOT found by RecursiveSearch.");
+            }
+        }
+        else
+        {
+             Debug.Log($"[DungeonGeneratorV2] Trash object found by GameObject.Find: {trashObj.name}");
+        }
+        
+        if (trashObj != null)
+        {
+            // Add Collider if missing
+            BoxCollider2D col = trashObj.GetComponent<BoxCollider2D>();
+            if (col == null)
+            {
+                col = trashObj.AddComponent<BoxCollider2D>();
+                col.isTrigger = true;
+                col.size = new Vector2(0.1f, 0.1f); // Extremely reduced size
+            }
+            else
+            {
+                 col.isTrigger = true;
+                 col.size = new Vector2(0.1f, 0.1f); // Ensure size is small even if existing
+            }
+
+            // Add TrashCan Script if missing
+            TrashCan trashCan = trashObj.GetComponent<TrashCan>();
+            if (trashCan == null)
+            {
+                trashCan = trashObj.AddComponent<TrashCan>();
+            }
         }
     }
 
@@ -1531,6 +1681,34 @@ public class DungeonGeneratorV2 : MonoBehaviour
             Debug.Log($"[DungeonGeneratorV2] Spawned SpecialTile_{i} at {pos} (World: {worldPos}) with sprite: {(sp != null ? sp.name : "NULL")}");
         }
     }
+}
+
+[System.Serializable]
+public class DungeonProfile
+{
+    [Header("Profile Settings")]
+    public string profileID;
+    public int weight = 10;
+    public int startFloor = 1; // この階層以降で出現
+
+    [Header("Dungeon Settings")]
+    public int gridWidth = 25;
+    public int gridHeight = 25;
+    public int minRooms = 5;
+    public int maxRooms = 10;
+    public int minRoomSize = 4;
+    public int maxRoomSize = 6;
+
+    [Header("Enemy Settings")]
+    public int minEnemies = 2;
+    public int maxEnemies = 5;
+
+    [Header("Shelf Settings")]
+    public int minShelvesPerRoom = 0;
+    public int maxShelvesPerRoom = 7;
+
+    [Header("Special Tile Settings")]
+    public int specialTileCount = 0;
 }
 
 

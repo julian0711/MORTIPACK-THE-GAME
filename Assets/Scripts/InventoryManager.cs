@@ -52,14 +52,42 @@ public class InventoryManager : MonoBehaviour
         }
     }
 
-    public void AddItem(string key)
+    [SerializeField] private int maxItemCount = 9;
+
+    public bool AddItem(string key)
     {
-        if (string.IsNullOrEmpty(key) || key == "nothing") return;
+        if (string.IsNullOrEmpty(key) || key == "nothing") return false;
 
         if (key == "report")
         {
             if (GameUIManager.Instance != null) GameUIManager.Instance.AddScore(100);
-            return; 
+            return true; // Treated as success (action consumed)
+        }
+
+        // Check Current Count
+        int currentCount = 0;
+        if (inventory.ContainsKey(key))
+        {
+            currentCount = inventory[key];
+        }
+
+        // Check Limit (Skip if full)
+        if (currentCount >= maxItemCount)
+        {
+            if (GameUIManager.Instance != null)
+            {
+                // Get Item Name
+                string itemName = key;
+                if (ItemDatabase.Instance != null)
+                {
+                    itemName = ItemDatabase.Instance.GetItemName(key);
+                }
+                
+                // Show Warning Message with Item Name
+                GameUIManager.Instance.ShowMessage($"{itemName}はこれ以上は持てない！", key);
+            }
+            Debug.Log($"[Inventory] Cannot add {key}. Max limit ({maxItemCount}) reached.");
+            return false;
         }
 
         if (inventory.ContainsKey(key))
@@ -73,6 +101,7 @@ public class InventoryManager : MonoBehaviour
 
         if (GameUIManager.Instance != null) GameUIManager.Instance.AddScore(10);
         OnInventoryChanged?.Invoke();
+        return true;
     }
 
     public Dictionary<string, int> GetInventory()

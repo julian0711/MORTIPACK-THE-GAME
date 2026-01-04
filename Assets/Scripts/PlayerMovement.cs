@@ -21,6 +21,24 @@ public class PlayerMovement : MonoBehaviour
     
     private void Start()
     {
+        // Ensure Physics components for Trigger detection (e.g. TrashCan)
+        BoxCollider2D col = GetComponent<BoxCollider2D>();
+        if (col == null) 
+        {
+            col = gameObject.AddComponent<BoxCollider2D>();
+            col.size = new Vector2(0.5f, 0.5f); // Small enough to not overlap too much
+            col.isTrigger = true; 
+        }
+
+        Rigidbody2D rb = GetComponent<Rigidbody2D>();
+        if (rb == null)
+        {
+            rb = gameObject.AddComponent<Rigidbody2D>();
+            rb.bodyType = RigidbodyType2D.Dynamic;
+            rb.gravityScale = 0f;
+            rb.constraints = RigidbodyConstraints2D.FreezeAll; 
+        }
+
         targetPosition = transform.position;
         spriteRenderer = GetComponent<SpriteRenderer>(); // Added initialization
 
@@ -165,15 +183,16 @@ public class PlayerMovement : MonoBehaviour
                 if (searchButtonHoldDuration >= 0.5f && !shopActionExecuted)
                 {
                     // Reroll Logic
-                    if (GameUIManager.Instance != null && GameUIManager.Instance.TotalPoint >= 5000)
+                    int resetCost = ItemDatabase.Instance.shopResetPrice;
+                    if (GameUIManager.Instance != null && GameUIManager.Instance.TotalPoint >= resetCost)
                     {
-                        if (GameUIManager.Instance.TrySpendPoint(5000))
+                        if (GameUIManager.Instance.TrySpendPoint(resetCost))
                         {
                             DungeonGeneratorV2 dGen = Object.FindFirstObjectByType<DungeonGeneratorV2>();
                             if (dGen != null)
                             {
                                 dGen.RefreshShopItems();
-                                GameUIManager.Instance.ShowMessage("商品を入れ替えました！", "vendor");
+                                GameUIManager.Instance.ShowMessage(ItemDatabase.Instance.vendorMessageConfig.thanksReroll, "vendor");
                                 
                                 // Play Sound
                                 if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.shopResetSE != null)
@@ -185,7 +204,8 @@ public class PlayerMovement : MonoBehaviour
                     }
                     else
                     {
-                         GameUIManager.Instance.ShowMessage("ポイントが足りないようだね… (必要: 5000Pt)", "vendor");
+                         string msg = string.Format(ItemDatabase.Instance.vendorMessageConfig.noPointReroll, resetCost);
+                         GameUIManager.Instance.ShowMessage(msg, "vendor");
                     }
                     
                     shopActionExecuted = true;
@@ -202,20 +222,22 @@ public class PlayerMovement : MonoBehaviour
                 {
                     // Short Press Logic
                     
-                    // A. Shop Item (Show Price)
-                    ShopItem shopItem = GetShopItemAtFeet();
-                    if (shopItem != null)
-                    {
-                        GameUIManager.Instance.ShowMessage($"{shopItem.price}Ptです！ご購入は長押しで！", shopItem.itemId);
-                    }
-                    else
-                    {
-                        // B. Vendor Interaction
-                        ShopVendor vendor = GetVendorAtFeet();
-                        if (vendor != null)
+                        // A. Shop Item (Show Price)
+                        ShopItem shopItem = GetShopItemAtFeet();
+                        if (shopItem != null)
                         {
-                             GameUIManager.Instance.ShowMessage("5000pointで商品を入れ替えますか？？(長押し)", "vendor");
+                            string msg = string.Format(ItemDatabase.Instance.vendorMessageConfig.checkPrice, shopItem.price);
+                            GameUIManager.Instance.ShowMessage(msg, shopItem.itemId);
                         }
+                        else
+                        {
+                            // B. Vendor Interaction
+                            ShopVendor vendor = GetVendorAtFeet();
+                            if (vendor != null)
+                            {
+                                 string msg = string.Format(ItemDatabase.Instance.vendorMessageConfig.checkReroll, ItemDatabase.Instance.shopResetPrice);
+                                 GameUIManager.Instance.ShowMessage(msg, "vendor");
+                            }
                         else
                         {
                             // C. Standard Interaction (Shelf, etc.)
@@ -268,21 +290,33 @@ public class PlayerMovement : MonoBehaviour
             if (GameUIManager.Instance.TrySpendPoint(shopItem.price))
             {
                 // Purchase Success (Point deduction handled in TrySpendPoint)
-                InventoryManager.Instance.AddItem(shopItem.itemId);
-                
-                GameUIManager.Instance.ShowMessage($"ありがとうございました～！", shopItem.itemId);
-                GameUIManager.Instance.ShowFloatingItem(shopItem.itemId, shopItem.transform.position);
-                
-                if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.getSE != null)
+                // Try to Add Item
+                if (InventoryManager.Instance != null && InventoryManager.Instance.AddItem(shopItem.itemId))
                 {
-                    GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.getSE);
+                    // Success
+                    GameUIManager.Instance.ShowMessage(ItemDatabase.Instance.vendorMessageConfig.thanksBuy, shopItem.itemId);
+                    GameUIManager.Instance.ShowFloatingItem(shopItem.itemId, shopItem.transform.position);
+                    
+                    if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.getSE != null)
+                    {
+                        GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.getSE);
+                    }
+                    
+                    Destroy(shopItem.gameObject);
                 }
-                
-                Destroy(shopItem.gameObject);
+                else
+                {
+                    // Failed (Inventory Full)
+                    // Refund points
+                    GameUIManager.Instance.AddPoint(shopItem.price); 
+                    // Message is shown by AddItem ('Cannot carry more')
+                    // Do NOT destroy item
+                }
             }
             else
             {
-                GameUIManager.Instance.ShowMessage($"おや、pointが足りないね ({shopItem.price}pt必要)");
+                string msg = string.Format(ItemDatabase.Instance.vendorMessageConfig.noPointItem, shopItem.price);
+                GameUIManager.Instance.ShowMessage(msg);
             }
         }
     }
@@ -346,23 +380,21 @@ public class PlayerMovement : MonoBehaviour
         
         foreach(var hit in hits)
         {
-            // 1. Check for Shelf
+            // 1. Check for SpecialTile (Priority - Rare Items)
+            SpecialTile specialTile = hit.GetComponent<SpecialTile>();
+            if (specialTile != null && specialTile.CanInteract())
+            {
+                specialTile.Interact(transform.position);
+                return; // SpecialTile interaction done
+            }
+            
+            // 2. Check for Shelf
             InteractableShelf shelf = hit.GetComponent<InteractableShelf>();
             if (shelf != null)
             {
                 shelf.Interact(transform.position);
                 continue; // Shelf interaction done
             }
-            
-            // 2. Check for ShopItem (Removed - Moved to Touch Interaction)
-            /*
-            ShopItem shopItem = hit.GetComponent<ShopItem>();
-            if (shopItem != null)
-            {
-                 // ... Old Logic ...
-                 return;
-            }
-            */
         }
     }
     

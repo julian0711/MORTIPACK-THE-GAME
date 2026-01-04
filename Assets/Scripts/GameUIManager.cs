@@ -26,6 +26,9 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         }
     }
 
+    // Sell Mode
+    public bool isSellMode = false;
+
     [SerializeField] private Text messageText;
     [SerializeField] private Text itemNameText; // Added for explicit item name display
     [SerializeField] private Text floorText;
@@ -199,6 +202,13 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
 
         UpdateFloorText();
         Debug.Log($"[Score] Added {points}. TotalScore:{TotalScore} TotalPoint:{TotalPoint} Stage:{StageScore}");
+    }
+
+    public void AddPoint(int points)
+    {
+        TotalPoint += points;
+        UpdateFloorText();
+        Debug.Log($"[Point] Added {points}. TotalPoint:{TotalPoint}");
     }
     
     // New Method for Purchasing
@@ -781,13 +791,21 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         ItemSlotHandler handler = slot.AddComponent<ItemSlotHandler>();
         
         handler.OnClick = () => {
-            ItemDatabase itemMgr = ItemDatabase.Instance;
-            if (itemMgr == null) itemMgr = FindFirstObjectByType<ItemDatabase>();
-
-            if (itemMgr != null)
+            if (isSellMode)
             {
-                string desc = itemMgr.GetItemDescription(key);
-                ShowMessage(desc ?? $"{key}", key);
+                int price = GetItemSellPrice(key);
+                ShowMessage($"売値: {price} Pt (長押しで売却)", key);
+            }
+            else
+            {
+                ItemDatabase itemMgr = ItemDatabase.Instance;
+                if (itemMgr == null) itemMgr = FindFirstObjectByType<ItemDatabase>();
+
+                if (itemMgr != null)
+                {
+                    string desc = itemMgr.GetItemDescription(key);
+                    ShowMessage(desc ?? $"{key}", key);
+                }
             }
         };
         
@@ -795,12 +813,23 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         {
             handler.OnLongPress = () => {
                 // If Inventory Screen is active, DO NOT use item (View Only mode for all slots)
+                // BUT if in Sell Mode, allow selling? Maybe yes. 
+                // Currently Sell Mode is triggered by standing on Trash Can, which is in-game.
+                // Inventory Screen pauses game? If so, Trash Can interaction might be blocked or safe.
+                
                 if (inventoryScreenPanel != null && inventoryScreenPanel.activeSelf)
                 {
                     return;
                 }
 
-                UseItem(key); 
+                if (isSellMode)
+                {
+                    SellItem(key);
+                }
+                else
+                {
+                    UseItem(key); 
+                }
                 
                 // If we are in Inventory Screen mode, we might want to refresh it.
                 // Using a simple check: if the parent is our inventory container.
@@ -1153,160 +1182,189 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
         switch (key)
         {
             case "warpcoin":
-                DungeonGeneratorV2 dungeon = FindFirstObjectByType<DungeonGeneratorV2>();
-                PlayerMovement player = FindFirstObjectByType<PlayerMovement>();
-                
-                if (dungeon != null && player != null)
                 {
-                    Vector3 bestPos = Vector3.zero;
-                    bool foundSafePos = false;
+                    DungeonGeneratorV2 dungeon = FindFirstObjectByType<DungeonGeneratorV2>();
+                    PlayerMovement player = FindFirstObjectByType<PlayerMovement>();
+                    
+                    if (dungeon != null && player != null)
+                    {
+                        Vector3 bestPos = Vector3.zero;
+                        bool foundSafePos = false;
 
-                    if (dungeon.IsFixedStage)
-                    {
-                        // Fixed Stage: Warp to Start Position
-                        bestPos = dungeon.CurrentFixedSpawnPoint;
-                        foundSafePos = true;
-                        Debug.Log("[GameUIManager] Fixed Stage detected. Warping to Spawn Point.");
-                    }
-                    else
-                    {
-                        // Normal Dungeon: Find Random Safe Position
-                        // 最大20回試行する
-                        for (int i = 0; i < 20; i++)
+                        if (dungeon.IsFixedStage)
                         {
-                            Vector3 candidatePos = dungeon.GetRandomWalkablePosition();
-                            Collider2D[] hits = Physics2D.OverlapCircleAll(candidatePos, 0.4f);
-                            bool hasEnemy = false;
-                            foreach (var hit in hits)
+                            // Fixed Stage: Warp to Start Position
+                            bestPos = dungeon.CurrentFixedSpawnPoint;
+                            foundSafePos = true;
+                            Debug.Log("[GameUIManager] Fixed Stage detected. Warping to Spawn Point.");
+                        }
+                        else
+                        {
+                            // Normal Dungeon: Find Random Safe Position
+                            // 最大20回試行する
+                            for (int i = 0; i < 20; i++)
                             {
-                                if (hit.GetComponent<EnemyMovement>() != null)
+                                Vector3 candidatePos = dungeon.GetRandomWalkablePosition();
+                                Collider2D[] hits = Physics2D.OverlapCircleAll(candidatePos, 0.4f);
+                                bool hasEnemy = false;
+                                foreach (var hit in hits)
                                 {
-                                    hasEnemy = true;
+                                    if (hit.GetComponent<EnemyMovement>() != null)
+                                    {
+                                        hasEnemy = true;
+                                        break;
+                                    }
+                                }
+
+                                if (!hasEnemy)
+                                {
+                                    bestPos = candidatePos;
+                                    foundSafePos = true;
                                     break;
                                 }
                             }
-
-                            if (!hasEnemy)
-                            {
-                                bestPos = candidatePos;
-                                foundSafePos = true;
-                                break;
-                            }
                         }
-                    }
 
-                    if (foundSafePos)
-                    {
-                        if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.warpSE != null)
+                        if (foundSafePos)
                         {
-                            GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.warpSE);
+                            if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.warpSE != null)
+                            {
+                                GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.warpSE);
+                            }
+                            StartCoroutine(player.WarpSequence(bestPos));
+                            // Fix: Consume item
+                            if (InventoryManager.Instance != null) InventoryManager.Instance.RemoveItem(key);
+                            string msg = ItemDatabase.Instance.GetItemUsageMessage(key);
+                            if (string.IsNullOrEmpty(msg)) msg = "ワープした！";
+                            ShowMessage(msg, key);
                         }
-                        StartCoroutine(player.WarpSequence(bestPos));
-                        // Fix: Consume item
-                        if (InventoryManager.Instance != null) InventoryManager.Instance.RemoveItem(key);
-                        string msg = ItemDatabase.Instance.GetItemUsageMessage(key);
-                        if (string.IsNullOrEmpty(msg)) msg = "ワープした！";
-                        ShowMessage(msg, key);
-                    }
-                    else
-                    {
-                        ShowMessage("ワープに失敗した。", key);
+                        else
+                        {
+                            ShowMessage("ワープに失敗した。", key);
+                        }
                     }
                 }
                 break;
 
             case "warp_gun":
-                PlayerMovement pm = FindFirstObjectByType<PlayerMovement>();
-                if (pm != null)
                 {
-                    pm.EnterShootingMode();
-                    string msg = ItemDatabase.Instance.GetItemUsageMessage(key);
-                    if (string.IsNullOrEmpty(msg)) msg = "転送銃を構えた。方向キーで発射！";
-                    ShowMessage(msg, key);
+                    PlayerMovement pm = FindFirstObjectByType<PlayerMovement>();
+                    if (pm != null)
+                    {
+                        pm.EnterShootingMode();
+                        string msg = ItemDatabase.Instance.GetItemUsageMessage(key);
+                        if (string.IsNullOrEmpty(msg)) msg = "転送銃を構えた。方向キーで発射！";
+                        ShowMessage(msg, key);
+                    }
                 }
                 break;
 
             case "radio":
-                TurnManager turnManager = FindFirstObjectByType<TurnManager>();
-                if (turnManager != null)
                 {
-                    if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.radioSE != null)
+                    TurnManager turnManager = FindFirstObjectByType<TurnManager>();
+                    if (turnManager != null)
                     {
-                        GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.radioSE);
+                        if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.radioSE != null)
+                        {
+                            GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.radioSE);
+                        }
+                        
+                        int stunTurns = ItemDatabase.Instance.GetItemEffectValue(key);
+                        if (stunTurns <= 0) stunTurns = 10; // Fallback
+
+                        turnManager.StunAllEnemies(stunTurns);
+                        string msg = ItemDatabase.Instance.GetItemUsageMessage(key);
+                        if (string.IsNullOrEmpty(msg)) msg = $"怪音波を流した！全敵{stunTurns}ターン停止！";
+                        ShowMessage(msg, key);
+                        if (InventoryManager.Instance != null) InventoryManager.Instance.RemoveItem(key);
                     }
-                    turnManager.StunAllEnemies(10);
-                    string msg = ItemDatabase.Instance.GetItemUsageMessage(key);
-                    if (string.IsNullOrEmpty(msg)) msg = "怪音波を流した！全敵10ターン停止！";
-                    ShowMessage(msg, key);
-                    InventoryManager.Instance.RemoveItem(key);
                 }
                 break;
 
             case "map": 
-                DungeonGeneratorV2 dungeonMap = FindFirstObjectByType<DungeonGeneratorV2>();
-                if (dungeonMap != null)
                 {
-                    dungeonMap.RevealRandomAreas(3);
-                    string msg = ItemDatabase.Instance.GetItemUsageMessage(key);
-                    if (string.IsNullOrEmpty(msg)) msg = "周辺の地図が書き込まれた！";
-                    ShowMessage(msg, key);
+                    DungeonGeneratorV2 dungeonMap = FindFirstObjectByType<DungeonGeneratorV2>();
+                    if (dungeonMap != null)
+                    {
+                        int revealCount = ItemDatabase.Instance.GetItemEffectValue(key);
+                        if (revealCount <= 0) revealCount = 3;
+
+                        dungeonMap.RevealRandomAreas(revealCount);
+                        string msg = ItemDatabase.Instance.GetItemUsageMessage(key);
+                        if (string.IsNullOrEmpty(msg)) msg = "周辺の地図が書き込まれた！";
+                        ShowMessage(msg, key);
+                    }
                 }
                 break;
                 
             case "radar":
-                DungeonGeneratorV2 dGenRadar = FindFirstObjectByType<DungeonGeneratorV2>();
-                if (dGenRadar != null)
                 {
-                    if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.radarSE != null)
+                    DungeonGeneratorV2 dGenRadar = FindFirstObjectByType<DungeonGeneratorV2>();
+                    if (dGenRadar != null)
                     {
-                        GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.radarSE);
+                        if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.radarSE != null)
+                        {
+                            GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.radarSE);
+                        }
+                        
+                        int radarTurns = ItemDatabase.Instance.GetItemEffectValue(key);
+                        if (radarTurns <= 0) radarTurns = 10;
+                        
+                        dGenRadar.ActivateRadar(radarTurns); 
+                        string msg = ItemDatabase.Instance.GetItemUsageMessage(key);
+                        if (string.IsNullOrEmpty(msg)) msg = $"エネミーの気配が可視化された！（{radarTurns}ターン）";
+                        ShowMessage(msg, key);
+                        if (InventoryManager.Instance != null) InventoryManager.Instance.RemoveItem(key);
                     }
-                    dGenRadar.ActivateRadar(10); // 10 Turns
-                    string msg = ItemDatabase.Instance.GetItemUsageMessage(key);
-                    if (string.IsNullOrEmpty(msg)) msg = "エネミーの気配が可視化された！（10ターン）";
-                    ShowMessage(msg, key);
-                    if (InventoryManager.Instance != null) InventoryManager.Instance.RemoveItem(key);
                 }
                 break;
 
             case "talisman":
-                DungeonGeneratorV2 dGenTalisman = FindFirstObjectByType<DungeonGeneratorV2>();
-                if (dGenTalisman != null)
                 {
-                    if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.talismanSE != null)
+                    DungeonGeneratorV2 dGenTalisman = FindFirstObjectByType<DungeonGeneratorV2>();
+                    if (dGenTalisman != null)
                     {
-                        GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.talismanSE);
+                        if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.talismanSE != null)
+                        {
+                            GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.talismanSE);
+                        }
+                        
+                        int banishCount = ItemDatabase.Instance.GetItemEffectValue(key);
+                        // If <= 0, BanishEnemies acts as Random 1-3
+                        
+                        int banished = dGenTalisman.BanishEnemies(banishCount);
+                        if (banished > 0)
+                        {
+                            string msg = ItemDatabase.Instance.GetItemUsageMessage(key);
+                            if (string.IsNullOrEmpty(msg)) msg = $"不吉な気配が消えた！（{banished}体消滅）";
+                            ShowMessage(msg, key);
+                        }
+                        else
+                        {
+                            ShowMessage("しかし何も起きなかった…（エネミー不在）", key);
+                        }
+                        if (InventoryManager.Instance != null) InventoryManager.Instance.RemoveItem(key);
                     }
-                    int banished = dGenTalisman.BanishEnemies();
-                    if (banished > 0)
-                    {
-                        string msg = ItemDatabase.Instance.GetItemUsageMessage(key);
-                        if (string.IsNullOrEmpty(msg)) msg = $"不吉な気配が消えた！（{banished}体消滅）";
-                        ShowMessage(msg, key);
-                    }
-                    else
-                    {
-                        ShowMessage("しかし何も起きなかった…（エネミー不在）", key);
-                    }
-                    if (InventoryManager.Instance != null) InventoryManager.Instance.RemoveItem(key);
                 }
                 break;
                 
             case "bluebox":
-                PlayerMovement pmBlue = FindFirstObjectByType<PlayerMovement>();
-                DungeonGeneratorV2 dGenBlue = FindFirstObjectByType<DungeonGeneratorV2>();
-                
-                if (pmBlue != null && dGenBlue != null)
                 {
-                    if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.blueboxSE != null)
+                    PlayerMovement pmBlue = FindFirstObjectByType<PlayerMovement>();
+                    DungeonGeneratorV2 dGenBlue = FindFirstObjectByType<DungeonGeneratorV2>();
+                    
+                    if (pmBlue != null && dGenBlue != null)
                     {
-                        GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.blueboxSE);
+                        if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.blueboxSE != null)
+                        {
+                            GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.blueboxSE);
+                        }
+                        dGenBlue.SpawnShopDoorAt(pmBlue.transform.position);
+                        string msg = ItemDatabase.Instance.GetItemUsageMessage(key);
+                        if (string.IsNullOrEmpty(msg)) msg = "謎の扉が現れた…";
+                        ShowMessage(msg, key);
+                        if (InventoryManager.Instance != null) InventoryManager.Instance.RemoveItem(key);
                     }
-                    dGenBlue.SpawnShopDoorAt(pmBlue.transform.position);
-                    string msg = ItemDatabase.Instance.GetItemUsageMessage(key);
-                    if (string.IsNullOrEmpty(msg)) msg = "謎の扉が現れた…";
-                    ShowMessage(msg, key);
-                    if (InventoryManager.Instance != null) InventoryManager.Instance.RemoveItem(key);
                 }
                 break;
 
@@ -1327,6 +1385,46 @@ public class GameUIManager : MonoBehaviour // Forced Refresh 2
             if (result != null) return result;
         }
         return null;
+    }
+    public void SetSellMode(bool enabled)
+    {
+        if (isSellMode != enabled)
+        {
+            isSellMode = enabled;
+        }
+    }
+
+    private int GetItemSellPrice(string key)
+    {
+        if (ItemDatabase.Instance != null) return ItemDatabase.Instance.GetItemSellPrice(key);
+        return 0;
+    }
+
+    private void SellItem(string key)
+    {
+        if (InventoryManager.Instance != null && InventoryManager.Instance.HasItem(key))
+        {
+            int price = GetItemSellPrice(key);
+            
+            // 1. Remove Item
+            InventoryManager.Instance.RemoveItem(key);
+            
+            // 2. Add Score/Points
+            AddPoint(price);
+            
+            // 3. Play Sound
+            if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.getSE != null)
+            {
+                GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.getSE); 
+            }
+            
+            // 4. Show Message
+            ShowMessage($"{price} Ptをゲットした！！", key);
+            
+            // 5. Refresh UI (InventoryManager event should handle update, but force refresh might be needed if not auto)
+            // InventoryManager invokes OnInventoryChanged, which calls UpdateInventoryUI in GameUIManager.
+            // So we are good.
+        }
     }
 }
 

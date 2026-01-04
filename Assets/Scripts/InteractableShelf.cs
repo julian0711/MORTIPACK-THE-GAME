@@ -15,17 +15,27 @@ public class InteractableShelf : MonoBehaviour
     {
         public string key;
         public string name;
-        public int weight;
+        public int weight;          // Noraml Shelf Weight
+        public int specialTileWeight; // Special Tile Weight
         public int price; // Shop Price
+        public int sellPrice; // Sell Price for Trash Can
+        [Header("Effect Settings")]
+        [Tooltip("Effect Magnitude (Turns, Counts, Areas etc.)")]
+        [SerializeField]
+        public int effectValue; // Effect Magnitude (Turns, Counts, etc.)
+        [TextArea]
         public string description;
         public List<string> usageMessages; // Supports multiple messages
         
-        public DropItem(string k, string n, int w, int p, string d = "", params string[] u) 
+        public DropItem(string k, string n, int w, int sw, int p, int sp, int ev, string d = "", params string[] u) 
         { 
             key = k; 
             name = n; 
-            weight = w; 
+            weight = w;
+            specialTileWeight = sw;
             price = p;
+            sellPrice = sp;
+            effectValue = ev;
             description = d; 
             usageMessages = new List<string>(u);
             if (usageMessages.Count == 0) usageMessages.Add(""); // Ensure not null/empty
@@ -157,17 +167,25 @@ public class InteractableShelf : MonoBehaviour
         else if (InventoryManager.Instance != null && resultKey != "nothing")
         {
              // Normal Item: Add to Inventory
-             InventoryManager.Instance.AddItem(resultKey);
-             // Normal message
-             if (ui != null) ui.ShowMessage($"{resultName} を入手した", resultKey);
-			 
-			 // Display Result (Animation)
-			 if (ui != null)
-			 {
-				ui.ShowFloatingItem(resultKey, playerPosition);
-			 }
-        }
-        else if (InventoryManager.Instance == null && resultKey != "nothing")
+             bool check = InventoryManager.Instance.AddItem(resultKey);
+             
+             if (check)
+             {
+                 // Success: Show Message and Effect
+                 if (ui != null) ui.ShowMessage($"{resultName} を入手した", resultKey);
+                 
+                 // Display Result (Animation)
+                 if (ui != null)
+                 {
+                    ui.ShowFloatingItem(resultKey, playerPosition);
+                 }
+             }
+             else
+             {
+                 // Failed (Full): Message already shown by InventoryManager
+                 // Do not show "Obtained" message
+             }
+        }else if (InventoryManager.Instance == null && resultKey != "nothing")
         {
         }
 		// Handle "nothing" case explicitly or just skip floating item
@@ -193,11 +211,18 @@ public class InteractableShelf : MonoBehaviour
         // 3. Wait 0.5s (Simulate looking at map)
         yield return new WaitForSeconds(0.5f);
 
-        // 4. Trigger Effect (Reveal Random Areas - Standard logic)
+        // 4. Trigger Effect (Reveal Random Areas - Configurable)
         DungeonGeneratorV2 dungeon = FindFirstObjectByType<DungeonGeneratorV2>();
         if (dungeon != null)
         {
-            dungeon.RevealRandomAreas(3);
+            int revealCount = 3; // Default
+            if (ItemDatabase.Instance != null)
+            {
+                revealCount = ItemDatabase.Instance.GetItemEffectValue(key);
+                if (revealCount <= 0) revealCount = 3;
+            }
+
+            dungeon.RevealRandomAreas(revealCount);
             if (ui != null) ui.ShowMessage("周辺の地図が書き込まれた！", key);
         }
 
