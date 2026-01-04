@@ -18,7 +18,6 @@ public class MobileGameCamera : MonoBehaviour
         if (GetComponent<AudioListener>() == null)
         {
             gameObject.AddComponent<AudioListener>();
-            Debug.Log("[MobileGameCamera] Auto-added AudioListener.");
         }
 
         cam.orthographic = useOrthographic;
@@ -43,11 +42,9 @@ public class MobileGameCamera : MonoBehaviour
             // プレイヤーの位置にカメラを移動（Z軸は-10のまま）
             Vector3 playerPos = playerTransform.position;
             transform.position = new Vector3(playerPos.x, playerPos.y, -10f);
-            Debug.Log($"Camera initialized at player position: {transform.position}");
         }
         else
         {
-            Debug.LogWarning("Player not found! Camera will stay at default position.");
         }
     }
 

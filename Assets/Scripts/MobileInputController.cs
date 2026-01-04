@@ -37,7 +37,6 @@ public class MobileInputController : MonoBehaviour
              GameObject eventSystem = new GameObject("EventSystem");
              eventSystem.AddComponent<UnityEngine.EventSystems.EventSystem>();
              eventSystem.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
-             Debug.Log("[MobileInputController] Auto-created EventSystem (was missing).");
         }
 
         // 1. Dynamic Rebinding: Find UI elements if ANY references are missing
@@ -105,7 +104,6 @@ public class MobileInputController : MonoBehaviour
 
     private void RebindUIElements()
     {
-        Debug.Log("[MobileInputController] Rebinding UI elements...");
         GameObject canvasObj = GameObject.Find("MobileControlsCanvas");
         if (canvasObj != null)
         {
@@ -132,11 +130,9 @@ public class MobileInputController : MonoBehaviour
                 // Assuming it's not critical for Search button bug.
             }
             
-            Debug.Log($"[MobileInputController] Rebound: Search={interactButton!=null}, Up={upButton!=null}");
         }
         else
         {
-            Debug.LogWarning("[MobileInputController] MobileControlsCanvas not found during rebind!");
         }
     }
 
@@ -154,7 +150,6 @@ public class MobileInputController : MonoBehaviour
                 }
                 else
                 {
-                    Debug.LogWarning("[MobileInput] GameUIManager not found!");
                 }
             });
         }
@@ -298,7 +293,6 @@ public class MobileInputController : MonoBehaviour
             if (buttonSprite != null)
             {
                  UnityEditor.Undo.RecordObject(this, "Auto-assign Button Sprite");
-                 Debug.Log($"[MobileInput] Auto-assigned sprite: {buttonSprite.name}");
             }
         }
 #endif
@@ -313,13 +307,10 @@ public class MobileInputController : MonoBehaviour
              oldOption.name = "Inventory";
              Text t = oldOption.GetComponentInChildren<Text>();
              if (t != null && t.text == "Option") t.text = "Inventory";
-             Debug.Log("[MobileInput] Renamed legacy 'Option' button to 'Inventory'");
         }
 
         inventoryButton = CreateOrGetButton("Inventory", actionsTransform, new Vector2(0, 150), 100f);
         SetupInventoryButton(inventoryButton);
-        
-        Debug.Log("Mobile UI Updated (Existing elements preserved, new ones added)!");
     }
 
     private Button CreateOrGetButton(string name, Transform parent, Vector2 pos, float size)

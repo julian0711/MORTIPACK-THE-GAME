@@ -26,8 +26,6 @@ public class BreathingAnimation : MonoBehaviour
         {
             spriteRenderer.sprite = sprite1;
         }
-        
-        Debug.Log($"[BreathingAnimation] Setup complete for {gameObject.name}. S1: {sprite1?.name}, S2: {sprite2?.name}, Interval: {interval}");
     }
     
     private void Update()

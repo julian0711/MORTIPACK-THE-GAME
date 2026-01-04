@@ -63,11 +63,13 @@ public class GlobalSoundManager : MonoBehaviour
         }
     }
     
+#if UNITY_EDITOR
     private void Update()
     {
-        // Allow runtime tweaking
+        // Allow runtime tweaking in Editor only
         UpdateVolumes();
     }
+#endif
 
     private void UpdateVolumes()
     {

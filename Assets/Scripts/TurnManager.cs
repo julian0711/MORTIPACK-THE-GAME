@@ -10,7 +10,6 @@ public class TurnManager : MonoBehaviour
         if (!enemies.Contains(enemy))
         {
             enemies.Add(enemy);
-            Debug.Log($"Enemy registered: {enemy.name}");
         }
     }
     
@@ -30,14 +29,7 @@ public class TurnManager : MonoBehaviour
         OnTurnCompleted?.Invoke();
     }
     
-    private void Update()
-    {
-        // デバッグ用
-        if (Input.GetKeyDown(KeyCode.Space))
-        {
-            Debug.Log($"Registered enemies: {enemies.Count}");
-        }
-    }
+
 
     public void StunAllEnemies(int turns)
     {
@@ -48,6 +40,5 @@ public class TurnManager : MonoBehaviour
                 enemy.Stun(turns);
             }
         }
-        Debug.Log($"[TurnManager] Stunned all enemies for {turns} turns.");
     }
 }

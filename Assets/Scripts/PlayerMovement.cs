@@ -27,7 +27,6 @@ public class PlayerMovement : MonoBehaviour
         turnManager = Object.FindFirstObjectByType<TurnManager>();
         if (turnManager == null)
         {
-            Debug.LogWarning("TurnManager not found in scene!");
         }
         
         mobileInput = Object.FindFirstObjectByType<MobileInputController>();
@@ -35,7 +34,6 @@ public class PlayerMovement : MonoBehaviour
         {
             GameObject inputObj = new GameObject("MobileInputController");
             mobileInput = inputObj.AddComponent<MobileInputController>();
-            Debug.Log("[PlayerMovement] Auto-created MobileInputController");
         }
 
         if (GameUIManager.Instance == null)
@@ -45,7 +43,6 @@ public class PlayerMovement : MonoBehaviour
             {
                 GameObject uiObj = new GameObject("GameUIManager");
                 uiObj.AddComponent<GameUIManager>();
-                Debug.Log("[PlayerMovement] Auto-created GameUIManager");
             }
         }
 
@@ -56,14 +53,12 @@ public class PlayerMovement : MonoBehaviour
             {
                 GameObject invObj = new GameObject("InventoryManager");
                 invObj.AddComponent<InventoryManager>();
-                Debug.Log("[PlayerMovement] Auto-created InventoryManager");
             }
         }
 
         dungeonGenerator = Object.FindFirstObjectByType<DungeonGeneratorV2>();
         if (dungeonGenerator == null)
         {
-            Debug.LogError("DungeonGeneratorV2 not found! Movement restriction might fail.");
         }
     }
     
@@ -77,8 +72,6 @@ public class PlayerMovement : MonoBehaviour
         {
             dungeonGenerator.RevealMap(position);
         }
-        
-        Debug.Log($"Player initialized at position: {position}");
     }
     
     private bool inputEnabled = true;
@@ -335,8 +328,6 @@ public class PlayerMovement : MonoBehaviour
         BulletController bc = bullet.AddComponent<BulletController>();
         bc.Initialize(dir);
         
-        Debug.Log($"[PlayerMovement] Fired bullet in direction {dir}");
-        
         if (InventoryManager.Instance != null)
         {
             InventoryManager.Instance.RemoveItem("warp_gun");
@@ -409,17 +400,12 @@ public class PlayerMovement : MonoBehaviour
         {
             // Check if moving into an Enemy
             Collider2D[] hits = Physics2D.OverlapCircleAll(potentialPos, 0.4f);
-            if (hits.Length > 0)
-            {
-                 Debug.Log($"[PlayerMovement] OverlapCircleAll found {hits.Length} hits at {potentialPos}");
-            }
             foreach (var hit in hits)
             {
                 EnemyMovement enemy = hit.GetComponent<EnemyMovement>();
                 if (enemy != null)
                 {
                     enemy.SkipNextTurn();
-                    Debug.Log($"[PlayerMovement] Locking Enemy at {hit.transform.position}. Name: {hit.name}");
                 }
             }
 
@@ -444,7 +430,6 @@ public class PlayerMovement : MonoBehaviour
                 confusedTurns--;
                 if (confusedTurns == 0)
                 {
-                    Debug.Log("[PlayerMovement] Confusion wore off.");
                     GameUIManager.Instance.ShowMessage("意識がはっきりしてきた。");
                 }
             }
@@ -456,7 +441,6 @@ public class PlayerMovement : MonoBehaviour
     public void Confuse(int turns)
     {
         confusedTurns += turns;
-        Debug.Log($"[PlayerMovement] Confused for {confusedTurns} turns!");
     }
 
     private Vector2 GetMovementInput()
@@ -563,13 +547,11 @@ public class PlayerMovement : MonoBehaviour
             {
                 if (isInvincible)
                 {
-                    Debug.Log("[Debug] Player collided with Enemy, but Invincibility is ON.");
                     return;
                 }
 
                 if (InventoryManager.Instance != null && InventoryManager.Instance.HasItem("migawari"))
                 {
-                    Debug.Log("[PlayerMovement] Migawari activated! Preventing Game Over.");
                     StartCoroutine(ActivateDollSequence(enemy));
                     return; // Stop processing collision (prevent Game Over)
                 }
@@ -578,7 +560,6 @@ public class PlayerMovement : MonoBehaviour
                 {
                     GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.deadSE);
                 }
-                Debug.Log("Player collided with Enemy! Game Over.");
                 GameUIManager.Instance.ShowGameOverScreen();
                 // ShowGameOverScreen handles input disabling
             }
@@ -612,7 +593,6 @@ public class PlayerMovement : MonoBehaviour
         if (enemy != null)
         {
             enemy.Stun(5);
-            Debug.Log($"[PlayerMovement] Enemy {enemy.name} stunned for 5 turns by Doll.");
         }
 
         // 5. Re-enable Input
@@ -626,7 +606,6 @@ public class PlayerMovement : MonoBehaviour
         {
             foreach (var hit in hits)
             {
-                Debug.Log($"[PlayerMovement] Overlap Detected: {hit.name}");
                 // Case-insensitive check to cover "Door", "door", "door_shop", etc.
                 if (hit.name.IndexOf("door", System.StringComparison.OrdinalIgnoreCase) >= 0)
                 {
@@ -635,7 +614,6 @@ public class PlayerMovement : MonoBehaviour
                     {
                         if (InventoryManager.Instance.HasItem("key"))
                         {
-                            Debug.Log("[PlayerMovement] Shop Door reached with Key. Entering Shop...");
                             if (GlobalSoundManager.Instance != null && GlobalSoundManager.Instance.doorSE != null)
                             {
                                 GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.doorSE);
@@ -647,13 +625,11 @@ public class PlayerMovement : MonoBehaviour
                                 GameUIManager.Instance.NextStageIsShop = true;
                                 
                                 // Trigger Result Screen (which handles Point Add -> Next Button -> Load Scene)
-                                Debug.Log("[PlayerMovement] Shop Door reached. Flagging Shop and showing Result Screen.");
                                 GameUIManager.Instance.ShowResultScreen();
                             }
                         }
                         else
                         {
-                            Debug.Log("[PlayerMovement] Shop Door reached but no Key.");
                             GameUIManager.Instance.ShowMessage("鍵が必要だ。");
                         }
                         return; // Exit immediately
@@ -665,13 +641,11 @@ public class PlayerMovement : MonoBehaviour
                         {
                             GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.doorSE);
                         }
-                        Debug.Log("[PlayerMovement] Door reached with Key! Showing Result Screen.");
                         GameUIManager.Instance.ShowResultScreen();
                         return; // Found correct door, exit loop
                     }
                     else
                     {
-                        Debug.Log("[PlayerMovement] Door reached but no Key (or key missing in InventoryManager).");
                         GameUIManager.Instance.ShowMessage("鍵が必要だ。");
                     }
                 }
@@ -761,8 +735,6 @@ public class PlayerMovement : MonoBehaviour
         isShootingMode = true;
         isMoving = false; // Stop movement
         SetInputEnabled(false); // Disable normal movement processing
-        
-        Debug.Log("[PlayerMovement] Entered Shooting Mode. Waiting for input...");
     }
 
     private void UpdateShootingMode()
@@ -831,8 +803,6 @@ public class PlayerMovement : MonoBehaviour
         
         BulletController bc = bullet.AddComponent<BulletController>();
         bc.Initialize(dir);
-        
-        Debug.Log($"[PlayerMovement] Fired warp bullet in direction {dir}");
         
         if (InventoryManager.Instance != null)
         {

@@ -112,11 +112,9 @@ public class InteractableShelf : MonoBehaviour
                         break;
                     }
                 }
-                Debug.Log($"Shelf searched! Rolled: {roll}/{totalWeight} -> {resultKey} ({resultName})");
             }
             else
             {
-                 Debug.LogWarning("[InteractableShelf] Total weight is 0 or drop table empty!");
             }
         }
 
@@ -125,18 +123,15 @@ public class InteractableShelf : MonoBehaviour
         {
             if (resultKey == "nothing")
             {
-                if (GlobalSoundManager.Instance.searchSE == null) Debug.LogWarning("[InteractableShelf] searchSE is null!");
                 GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.searchSE);
             }
             else
             {
-                if (GlobalSoundManager.Instance.getSE == null) Debug.LogWarning("[InteractableShelf] getSE is null!");
                 GlobalSoundManager.Instance.PlaySE(GlobalSoundManager.Instance.getSE);
             }
         }
         else
         {
-             Debug.LogWarning("[InteractableShelf] GlobalSoundManager.Instance is NULL!");
         }
 
         // 1. Handle Item Acquisition & Special Effects
@@ -174,7 +169,6 @@ public class InteractableShelf : MonoBehaviour
         }
         else if (InventoryManager.Instance == null && resultKey != "nothing")
         {
-             Debug.LogWarning("InventoryManager not found! Item might be lost.");
         }
 		// Handle "nothing" case explicitly or just skip floating item
 		else if (resultKey == "nothing" && ui != null)

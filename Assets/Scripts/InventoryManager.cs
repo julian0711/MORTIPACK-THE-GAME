@@ -34,12 +34,10 @@ public class InventoryManager : MonoBehaviour
         if (debugStartWithKey)
         {
             AddItem("key");
-            Debug.Log("[InventoryManager] Debug: Added initial key.");
         }
 
         if (debugStartWithAllItems)
         {
-            Debug.Log("[InventoryManager] Debug: Adding ALL items (except key).");
             if (ItemDatabase.Instance != null)
             {
                 foreach (var itemData in ItemDatabase.Instance.shelfDropTable)
@@ -61,7 +59,6 @@ public class InventoryManager : MonoBehaviour
         if (key == "report")
         {
             if (GameUIManager.Instance != null) GameUIManager.Instance.AddScore(100);
-            Debug.Log("[InventoryManager] Found Report. Score +100.");
             return; 
         }
 
@@ -74,7 +71,6 @@ public class InventoryManager : MonoBehaviour
             inventory[key] = 1;
         }
 
-        Debug.Log($"[InventoryManager] Added {key}. Total: {inventory[key]}");
         if (GameUIManager.Instance != null) GameUIManager.Instance.AddScore(10);
         OnInventoryChanged?.Invoke();
     }
@@ -105,7 +101,6 @@ public class InventoryManager : MonoBehaviour
     public void ClearInventory()
     {
         inventory.Clear();
-        Debug.Log("[InventoryManager] Inventory Cleared.");
         OnInventoryChanged?.Invoke();
     }
 }

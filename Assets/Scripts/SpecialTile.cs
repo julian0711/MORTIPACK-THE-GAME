@@ -31,7 +31,6 @@ public class SpecialTile : MonoBehaviour
 
     public void Reveal()
     {
-        Debug.Log($"[SpecialTile] Reveal called on {this.name} at {transform.position}");
         if (sr != null)
         {
             Color c = Color.white;
